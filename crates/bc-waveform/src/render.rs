@@ -40,7 +40,7 @@ void main() {
 /// Fragment shader; the display-mapping constants come from [`crate::view`] / [`crate::bars`] so
 /// the shader and the Canvas2D fallback cannot drift apart.
 fn frag() -> String {
-    use crate::bars::{BAR_EXPONENT, BAR_PEAK_WEIGHT, BAR_RMS_WEIGHT};
+    use crate::bars::{BAR_EXPONENT, BAR_FLOOR};
     use crate::view::{
         DECK_EXPONENT, HALO_ALPHA, MONO_BODY_HEADROOM, HUE_SHARPNESS, LAYER_ALPHA, PLAYED_ALPHA, SAT_FLOOR,
     };
@@ -50,8 +50,7 @@ precision highp float;
 precision highp int;
 precision highp sampler2D;
 const float BAR_EXP = {BAR_EXPONENT:.4};
-const float BAR_RMS_W = {BAR_RMS_WEIGHT:.4};
-const float BAR_PEAK_W = {BAR_PEAK_WEIGHT:.4};
+const float BAR_FLOOR = {BAR_FLOOR:.4};
 const float DECK_EXP = {DECK_EXPONENT:.4};
 const float SHARP = {HUE_SHARPNESS:.4};
 const float SAT_FLOOR = {SAT_FLOOR:.4};
@@ -78,7 +77,7 @@ uniform int u_width;
 uniform int u_style;
 uniform ivec2 u_lv[24];
 uniform float u_play;
-uniform vec4 u_ref;    // rms, peak, 0, 0 (linear)
+uniform vec4 u_ref;    // rms, peak, rms_lo, 0 (linear)
 uniform vec3 u_bref;   // low, mid, high (linear)
 uniform vec4 u_bg;
 uniform vec4 u_wave;
@@ -163,9 +162,11 @@ void bars(float lx) {
     int slot = clamp(k - u_first, 0, u_nlev - 1);
     vec4 e; vec2 pk;
     gather(slot, tb0, tb1, e, pk);
-    float peak = lin(max(pk.x, pk.y));
-    float r = pow(clamp(e.x / max(u_ref.x, 1e-6), 0.0, 1.0), BAR_EXP);
-    float h = min(BAR_RMS_W * r + BAR_PEAK_W * clamp(peak / max(u_ref.y, 1e-6), 0.0, 1.0), 1.0);
+    // bars::bar_height
+    float lo = max(u_ref.z, 1e-6);
+    float hi = max(u_ref.x, 1e-6);
+    float h = e.x < lo ? BAR_FLOOR * max(e.x / lo, 0.0)
+        : BAR_FLOOR + (1.0 - BAR_FLOOR) * pow(clamp(log(e.x / lo) / log(max(hi / lo, 1.0001)), 0.0, 1.0), BAR_EXP);
     float hh = 0.5 * u_res.y;
     float half_h = max(h * hh, 0.75);
     float ad = abs(gl_FragCoord.y - u_org.y - hh);
@@ -758,7 +759,7 @@ impl WaveformView {
             },
         );
         let refs = self.active_refs();
-        gl.uniform4f(s.wu.rf.as_ref(), refs.rms, refs.peak, 0.0, 0.0);
+        gl.uniform4f(s.wu.rf.as_ref(), refs.rms, refs.peak, refs.rms_lo, 0.0);
         gl.uniform3f(s.wu.bref.as_ref(), refs.low, refs.mid, refs.high);
         let (bw, gp) = self.bar_px();
         gl.uniform2f(s.wu.bar.as_ref(), bw, gp);

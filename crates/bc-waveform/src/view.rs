@@ -428,8 +428,9 @@ pub fn build_marker_rects(
     let px = res.x_at_time(v.playhead_s);
 
     if bars {
-        // The colour boundary is the playhead: no shade, no playhead line, no grid, no hover
-        // line (hover is a tint in the shader). Cues and mix points are 1 px lines + a flag.
+        // No shade, no grid, no hover line (hover is a tint in the shader). Cues and mix points
+        // are 1 px lines + a flag. The playhead is a 2 px line with a 1 px edge in `played_to`
+        // on each side, so it stays visible against both bar colours.
         let flag = (h * 0.22).clamp(3.0, 6.0);
         let mut mark = |t: f64, col: Rgba| {
             let x = res.x_at_time(t);
@@ -449,6 +450,8 @@ pub fn build_marker_rects(
                 mark(t, col);
             }
         }
+        out.extend(vline(px, 4.0, 0.0, h, theme.played_to, css_w));
+        out.extend(vline(px, 2.0, 0.0, h, theme.playhead, css_w));
         let _ = w;
         return out;
     }

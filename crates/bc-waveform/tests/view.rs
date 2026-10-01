@@ -337,7 +337,8 @@ fn bars_theme_defaults_and_markers() {
     // white played, cyan unplayed
     assert!(t.played[0] > 0.85 && t.played[1] > 0.85 && t.played[2] > 0.85);
     assert!(t.unplayed[2] > t.unplayed[0] + 0.4 && t.unplayed[1] > t.unplayed[0] + 0.3);
-    // Bars: no playhead line, no shade, no grid; a cue is a thin line plus a flag
+    // Bars: no shade, no grid, no hover line; a cue is a thin line plus a flag; the playhead
+    // is a line over a wider edge in `played_to`
     let v = ViewState { style: Style::Bars, playhead_s: 50.0, ..Default::default() };
     let m = Markers {
         grid: Some(grid(128.0)),
@@ -347,8 +348,12 @@ fn bars_theme_defaults_and_markers() {
         ..Default::default()
     };
     let rects = build_marker_rects(&m, &v, &t, 100.0, 500.0, 56.0);
-    assert!(rects.iter().all(|r| r.color != t.playhead && r.color != t.hover && r.color != t.played_shade));
-    assert_eq!(rects.len(), 4, "two markers x (line + flag)");
+    assert!(rects.iter().all(|r| r.color != t.hover && r.color != t.played_shade));
+    assert_eq!(rects.len(), 6, "two markers x (line + flag), playhead edge + line");
+    let (edge, line) = (&rects[4], &rects[5]);
+    assert_eq!((edge.color, line.color), (t.played_to, t.playhead));
+    assert!(edge.x0 < line.x0 && edge.x1 > line.x1);
+    assert!((line.x0 + line.x1) / 2.0 == 250.0, "playhead at 50 s of 100 s on 500 px");
 }
 
 #[test]

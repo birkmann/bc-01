@@ -357,7 +357,7 @@
 .pp-summary .ok { color: var(--color-accent); } .pp-summary .bad { color: var(--color-danger); }
 .pp-name-in { width: 140px; height: 24px; font-size: var(--text-2xs); }
 .pp-sel { height: 22px; width: auto; font-size: var(--text-2xs); padding: 0 6px; }
-.pp-tags { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.pp-tagpick { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .pp-tag-in { height: 22px; min-width: 90px; flex: 1; font-size: var(--text-2xs); padding: 0 8px; }
 .pp-warn { display: flex; align-items: center; gap: 6px; font-size: var(--text-2xs); color: var(--color-warn); }
 

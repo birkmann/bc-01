@@ -32,7 +32,7 @@ pub fn TagPicker(
     });
     let ph = placeholder.clone();
     view! {
-        <div class="pp-tags">
+        <div class="pp-tagpick">
             <div class="pp-chips">
                 {move || value.get().into_iter().map(|t| {
                     let t2 = t.clone();
