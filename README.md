@@ -2,22 +2,20 @@
   <img src="packaging/icons/bc-128.png" width="96" height="96" alt="">
 </p>
 <h1 align="center">bc</h1>
-<p align="center"><b>bandcamp library &amp; dj tool for linux</b> · from the dig to the set<br>
+<p align="center"><b>bandcamp library &amp; dj tool for linux</b><br>
 <a href="#installing">Install</a> · <a href="#using-it">Manual</a></p>
 
 ![The bc home screen](website/assets/img/bc-home.png)
 
-bc is a native Linux app that covers the whole path from *found it on
-Bandcamp* to *it's in my DJ set*: discovery and downloads, a music library that
-stays fast however large it grows, analysis, playlists, beatmatched playback and
-automixed DJ sets. It is written in Rust from the database to the interface,
-and replaces an earlier Python/React app of the same name.
+bc is a Linux app for finding and downloading music on Bandcamp, managing a
+local music library, analyzing tracks, and playing and building DJ sets. It is
+written in Rust and replaces an earlier Python/React version of bc.
 
 ## What it does
 
 - **Library.** Scans your music folders (tags, cover art) into SQLite with
-  full-text search. Every row of the collection is listed, sorted and filtered
-  on the server — no 500-row cap. Albums, artists, labels, tags, loved tracks,
+  full-text search. Sorting and filtering run on the server, so the track list
+  has no row limit. Albums, artists, labels, tags, loved tracks,
   favourites, play history, Top 10, crate dig, metadata editing with dry run
   and undo, cleanup of junk and strays, completeness checks and moving library
   roots.
@@ -26,46 +24,42 @@ and replaces an earlier Python/React app of the same name.
   collections and wishlists of other fans ("shelves" keep their downloads out
   of your own library), Harvest collects artists, labels, discover feeds,
   collections and wishlists into an inbox, and Tracklists matches uploaded
-  tracklists to releases. Requests go through a token bucket and a page cache,
-  and every API response body is checked, because Bandcamp reports errors with
-  HTTP 200.
-- **Downloads.** A durable job queue in SQLite with leases, a reaper and crash
-  recovery. The native downloader streams each file to `.part`, tags it,
-  fsyncs and renames it atomically, so a killed process never leaves a
-  truncated or untagged file; outcomes are decided by the files on disk, not
-  exit codes. `bandcamp-dl` can be used instead. A disk guard pauses the queue
-  when space runs low.
+  tracklists to releases. Requests are rate-limited and cached. Response
+  bodies are checked for errors because Bandcamp returns them with HTTP 200.
+- **Downloads.** A job queue stored in SQLite that resumes after a crash. Each
+  file is written to `.part`, tagged, and then renamed, so an interrupted
+  download does not leave a partial file. `bandcamp-dl` can be used instead of
+  the built-in downloader. The queue pauses when disk space runs low.
 - **Analysis.** One decode pass per track: tempo, beats, downbeats and
   phrases, Camelot key, energy, EBU R128 loudness with true peak, and a
   three-band waveform at about 172 points per second on an absolute dB scale.
-- **Player.** A sample-accurate audio engine on cpal with gapless playback,
-  EQ, filter, echo, limiter, key lock and five transition types.
-  Queue, history, shuffle and auto-fill; MPRIS media keys and a tray icon. The
-  same DSP code runs in the browser as an AudioWorklet, so a phone can play
-  through its own speaker.
-- **DJ sets.** Build a pool, let automix order it (beam search over key and
-  tempo compatibility), and fine-tune it in Plan or on the two-lane Arrange
+- **Player.** Audio engine on cpal with gapless playback, EQ, filter, echo,
+  limiter, key lock and five transition types. Queue, history, shuffle and
+  auto-fill. MPRIS media keys and a tray icon. The same DSP code runs in the
+  browser as an AudioWorklet, so a phone can play through its own speaker.
+- **DJ sets.** Automix orders a pool of tracks by key and tempo compatibility
+  (beam search). Sets can be edited in Plan or on the two-lane Arrange
   timeline. The live planner handles up next, wishes, tag rules, pools and a
-  set clock. Sets render offline to WAV or MP3.
+  set clock. Sets can be rendered to WAV or MP3.
 - **Recommendations.** Next up, similar tracks and taste, computed locally.
-- **Desktop and phone.** `bc-desktop` runs the server in-process and opens the
-  UI in a Chromium app window; `bc-rust serve --lan` makes the same UI
-  available to other devices on your network, each paired once.
+- **Desktop and phone.** `bc-desktop` runs the server and opens the UI in a
+  Chromium app window. `bc-rust serve --lan` serves the UI to other devices on
+  the local network after a one-time pairing.
 
 ## Performance
 
-Measured on a large test library, against the Python/React app bc replaces
-(same database, same disk). Smaller libraries are faster still.
+Compared with the previous Python/React version on the same database and
+disk.
 
 | | Previous app | bc |
 |---|---|---|
-| Start to ready | ≈110 s | **1.5 s** |
-| 200 tracks at offset 74,000 | 490–560 ms | **13–19 ms** |
+| Start to ready | ≈110 s | 1.5 s |
+| 200 tracks at offset 74,000 | 490–560 ms | 13–19 ms |
 | Track list | 500 rows, sorted in the browser | all rows, sorted on the server |
-| Search (`d`, `dub`, `dub techno`) | 280–520 ms | **25–41 ms** |
+| Search (`d`, `dub`, `dub techno`) | 280–520 ms | 25–41 ms |
 | Scrolling the full list | — | 53–60 fps |
 | Rescan of the whole library, nothing changed | — | 0.71 s |
-| Similar tracks, typical / worst seed | 118 / 223 ms | **67 / 194 ms** |
+| Similar tracks, typical / worst seed | 118 / 223 ms | 67 / 194 ms |
 | Beatmatch phase error (PipeWire, real device) | — | −0.05 ms, 0 xruns |
 
 ## Installing
@@ -74,7 +68,7 @@ Requirements: Rust (stable) with the `wasm32-unknown-unknown` target, `trunk`,
 `wasm-bindgen`, `brotli`, `clang`, `pkgconf`, and the ALSA, OpenSSL and D-Bus
 development files. At runtime: a Chromium-family browser (Chromium, Google
 Chrome, Brave, Edge or Vivaldi) for the app window, and optionally `ffmpeg`
-(MP3 set renders, exotic formats) and `bandcamp-dl`.
+(MP3 set renders, formats bc cannot decode itself) and `bandcamp-dl`.
 
 ```sh
 ./scripts/install.sh            # builds the UI and the app, installs into ~/.local
@@ -92,8 +86,8 @@ line tool is called `bc-rust` because `bc` is the GNU calculator.
 2. For collections, wishlists and the feed, paste your Bandcamp cookie under
    **Settings → Bandcamp**. It is stored with 0600 permissions or in the
    system keyring, is never logged, and is only sent to `*.bandcamp.com`.
-3. Browse **Explore**, **Feed** and **Fans**; queue what you want under
-   **Downloads**. New files land in the library on their own.
+3. Browse **Explore, Feed and Fans**; queue what you want under
+   **Downloads**. Finished downloads are added to the library automatically.
 4. Double-click any track to play it. **DJ Sets → New set** starts a set:
    add tracks, press **Automix**, then fine-tune in **Arrange**.
 
@@ -171,10 +165,10 @@ per area are in `docs/api/`; the `.bcw2` waveform format is described in
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Copyright (C) 2026 Rafael Birkmann.
+MIT, see [LICENSE](LICENSE). Copyright (C) 2026 Rafael Birkmann.
 
 The bundled Inter and JetBrains Mono fonts are under the SIL Open Font License
 (`crates/bc-ui/assets/fonts/`).
 
 bc is an independent project and is not affiliated with or endorsed by
-Bandcamp. Support the artists you dig: buy the music you keep.
+Bandcamp.
