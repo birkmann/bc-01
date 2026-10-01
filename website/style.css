@@ -169,14 +169,6 @@ p { margin: 0; }
 .specs dt { font-family: var(--mono); font-size: 13px; color: var(--muted); }
 .specs dd { margin: 0; font-size: 18px; }
 
-/* --- Performance table ----------------------------------------------- */
-.table-wrap { overflow-x: auto; border-top: 1px solid var(--fg); }
-.perf { width: 100%; border-collapse: collapse; font-size: 16px; }
-.perf th, .perf td { text-align: left; padding: 14px 24px 14px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
-.perf thead th { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--muted); }
-.perf tbody th { font-weight: 500; }
-.perf td { font-family: var(--mono); font-size: 15px; color: var(--text); }
-
 /* --- Sections -------------------------------------------------------- */
 .section { padding-top: 120px; padding-bottom: 120px; display: flex; flex-direction: column; gap: 40px; }
 .section h2 { font-size: clamp(36px, 5vw, 56px); letter-spacing: -0.04em; line-height: 1.05; max-width: 760px; }
@@ -319,8 +311,6 @@ p { margin: 0; }
   .code pre { padding-right: 24px; padding-top: 52px; font-size: 13px; }
 }
 @media (max-width: 420px) {
-  .perf { font-size: 14px; }
-  .perf td { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

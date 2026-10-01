@@ -106,25 +106,6 @@ try {
   </figure>
 </section>
 
-<section class="wrap section" id="performance">
-  <h2>Performance</h2>
-  <p class="lead narrow">bc compared with its previous Python/React version, on the same database and disk.</p>
-  <div class="table-wrap">
-    <table class="perf">
-      <thead><tr><th scope="col"></th><th scope="col">Previous version</th><th scope="col">bc</th></tr></thead>
-      <tbody>
-        <tr><th scope="row">Start to ready</th><td>≈110 s</td><td>1.5 s</td></tr>
-        <tr><th scope="row">Load 200 tracks at row 74,000</th><td>490–560 ms</td><td>13–19 ms</td></tr>
-        <tr><th scope="row">Track list</th><td>500 rows, sorted in the browser</td><td>all rows, sorted on the server</td></tr>
-        <tr><th scope="row">Search</th><td>280–520 ms</td><td>25–41 ms</td></tr>
-        <tr><th scope="row">Similar tracks, typical / worst</th><td>118 / 223 ms</td><td>67 / 194 ms</td></tr>
-        <tr><th scope="row">Rescan, nothing changed</th><td>n/a</td><td>0.71 s</td></tr>
-        <tr><th scope="row">Scrolling the full list</th><td>n/a</td><td>53–60 fps</td></tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
 <section class="wrap section" id="player">
   <h2>Player</h2>
   <p class="lead narrow">A native audio engine with gapless playback, EQ, filter, echo, limiter and key lock. Queue, history, shuffle and auto-fill. Media keys work through MPRIS. The same audio code runs in the browser, so a phone on the local network can open bc and play through its own speaker.</p>
