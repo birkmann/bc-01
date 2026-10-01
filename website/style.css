@@ -162,14 +162,20 @@ p { margin: 0; }
 .shot img { background: var(--ink); box-shadow: var(--shot-shadow); border: 1px solid var(--shot-edge); }
 .shot-hero { padding-bottom: 8px; }
 
-/* --- Proof numbers --------------------------------------------------- */
-.proof {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-top: 64px; border-top: 1px solid var(--fg);
-}
-.proof > div { padding: 24px 24px 0 0; display: flex; flex-direction: column; gap: 8px; }
-.num { font-family: var(--mono); font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.03em; line-height: 1.1; }
-.what { font-size: 15px; color: var(--text); max-width: 240px; }
+/* --- Specs ---------------------------------------------------------- */
+.specs { margin-top: 64px; }
+.specs dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--fg); }
+.specs dl > div { padding: 20px 24px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.specs dt { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.specs dd { margin: 0; font-size: 18px; }
+
+/* --- Performance table ----------------------------------------------- */
+.table-wrap { overflow-x: auto; border-top: 1px solid var(--fg); }
+.perf { width: 100%; border-collapse: collapse; font-size: 16px; }
+.perf th, .perf td { text-align: left; padding: 14px 24px 14px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.perf thead th { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--muted); }
+.perf tbody th { font-weight: 500; }
+.perf td { font-family: var(--mono); font-size: 15px; color: var(--text); }
 
 /* --- Sections -------------------------------------------------------- */
 .section { padding-top: 120px; padding-bottom: 120px; display: flex; flex-direction: column; gap: 40px; }
@@ -297,7 +303,7 @@ p { margin: 0; }
 /* --- Responsive ------------------------------------------------------ */
 @media (max-width: 1000px) {
   .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .proof { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; }
+  .specs dl { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; }
   .split, .split-reverse { grid-template-columns: minmax(0, 1fr); gap: 40px; }
   .split-reverse .shot { order: 2; }
 }
@@ -313,7 +319,8 @@ p { margin: 0; }
   .code pre { padding-right: 24px; padding-top: 52px; font-size: 13px; }
 }
 @media (max-width: 420px) {
-  .proof { grid-template-columns: minmax(0, 1fr); }
+  .perf { font-size: 14px; }
+  .perf td { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

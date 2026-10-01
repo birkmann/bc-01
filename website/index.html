@@ -54,7 +54,7 @@ try {
 
 <section class="wrap hero" id="top">
   <span class="label">linux · v0.1.0 · free &amp; open source</span>
-  <h1>Music library<br>and player.</h1>
+  <h1>Music library<br>and player</h1>
   <p class="lead">bc manages and plays your local music collection. Bandcamp search and downloads are built in. Written in Rust.</p>
   <div class="actions">
     <a class="pill pill-signal" href="#install">Install for Linux</a>
@@ -69,11 +69,13 @@ try {
   </picture>
 </figure>
 
-<section class="wrap proof" aria-label="Measured results">
-  <div><span class="num">1.5&nbsp;s</span><span class="what">from launch to a ready library. The previous Python version took 110&nbsp;s.</span></div>
-  <div><span class="num">13&nbsp;ms</span><span class="what">to load 200 tracks at row 74,000, sorted on the server</span></div>
-  <div><span class="num">41&nbsp;ms</span><span class="what">or less for a full-text search</span></div>
-  <div><span class="num">0.7&nbsp;s</span><span class="what">to rescan the whole library when nothing has changed</span></div>
+<section class="wrap specs" aria-label="Specifications">
+  <dl>
+    <div><dt>Platform</dt><dd>Linux</dd></div>
+    <div><dt>Language</dt><dd>Rust</dd></div>
+    <div><dt>Database</dt><dd>SQLite with full-text search</dd></div>
+    <div><dt>License</dt><dd>MIT</dd></div>
+  </dl>
 </section>
 
 <section class="wrap section" id="features">
@@ -104,6 +106,25 @@ try {
   </figure>
 </section>
 
+<section class="wrap section" id="performance">
+  <h2>Performance</h2>
+  <p class="lead narrow">bc compared with its previous Python/React version, on the same database and disk.</p>
+  <div class="table-wrap">
+    <table class="perf">
+      <thead><tr><th scope="col"></th><th scope="col">Previous version</th><th scope="col">bc</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Start to ready</th><td>≈110 s</td><td>1.5 s</td></tr>
+        <tr><th scope="row">Load 200 tracks at row 74,000</th><td>490–560 ms</td><td>13–19 ms</td></tr>
+        <tr><th scope="row">Track list</th><td>500 rows, sorted in the browser</td><td>all rows, sorted on the server</td></tr>
+        <tr><th scope="row">Search</th><td>280–520 ms</td><td>25–41 ms</td></tr>
+        <tr><th scope="row">Similar tracks, typical / worst</th><td>118 / 223 ms</td><td>67 / 194 ms</td></tr>
+        <tr><th scope="row">Rescan, nothing changed</th><td>n/a</td><td>0.71 s</td></tr>
+        <tr><th scope="row">Scrolling the full list</th><td>n/a</td><td>53–60 fps</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 <section class="wrap section" id="player">
   <h2>Player</h2>
   <p class="lead narrow">A native audio engine with gapless playback, EQ, filter, echo, limiter and key lock. Queue, history, shuffle and auto-fill. Media keys work through MPRIS. The same audio code runs in the browser, so a phone on the local network can open bc and play through its own speaker.</p>
@@ -118,7 +139,7 @@ try {
       </picture>
     </figure>
     <div class="copy">
-      <h2>Bandcamp discovery</h2>
+      <h2>Bandcamp</h2>
       <p>Explore: search Bandcamp and browse tag pages. Feed: new releases from followed artists and labels. Fans: browse other fans' collections. Liked releases go to the download queue.</p>
       <p>Requests are rate-limited and cached. Responses are validated, including errors Bandcamp returns with a 200 status.</p>
       <ul class="tags">
@@ -147,7 +168,7 @@ try {
 <section class="install" id="install">
   <div class="wrap section">
     <svg class="mark mark-lg" viewBox="0 0 100 100" fill="none" aria-hidden="true"><circle cx="50" cy="50" r="36" stroke="#F4F3EF" stroke-width="6"/><circle cx="50" cy="50" r="15" fill="#01FF95"/></svg>
-    <h2>Get bc.</h2>
+    <h2>Install</h2>
     <p class="lead">Builds from source and installs into <code>~/.local</code>. No root needed.</p>
     <div class="code" role="group" aria-label="Install commands">
       <pre><code><span class="prompt">$</span> git clone https://github.com/birkmann/bc-01.git bc
