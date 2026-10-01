@@ -116,7 +116,7 @@ p { margin: 0; }
 .lockup { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--fg); }
 .lockup:hover { color: var(--fg); }
 .mark { width: 28px; height: 28px; flex: none; }
-.wordmark { font-size: 22px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
+.wordmark { font-size: 22px; font-weight: 700; line-height: 1; }
 .nav-links { display: flex; align-items: center; gap: 28px; font-size: 15px; }
 .nav-links a { text-decoration: none; }
 .theme-toggle {
