@@ -202,10 +202,12 @@
 .lib-peek-artist { font-size: var(--text-2xs); }
 
 /* ---- Home ------------------------------------------------------------------------------- */
-.hm { padding-top: 6px; }
+/* The scroller is a size container so the sticky rail can be capped at its visible height. */
+.hm { padding-top: 6px; container-type: size; }
 .hm-cols { display: flex; align-items: flex-start; gap: 32px; max-width: 1500px; margin: 0 auto; }
 .hm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 36px; padding-bottom: 12px; }
-.hm-rail { width: 340px; flex: none; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 0; }
+/* Taller than the window: the rail scrolls on its own instead of hiding its bottom. */
+.hm-rail { width: 340px; flex: none; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 0; max-height: 100cqh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .hm-sec { min-width: 0; }
 .hm-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .hm-sec-title { font-size: var(--text-lg); font-weight: 650; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
