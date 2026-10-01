@@ -9,7 +9,7 @@
 
 bc is a native Linux app that covers the whole path from *found it on
 Bandcamp* to *it's in my DJ set*: discovery and downloads, a music library that
-stays fast at 190,000 tracks, analysis, playlists, beatmatched playback and
+stays fast however large it grows, analysis, playlists, beatmatched playback and
 automixed DJ sets. It is written in Rust from the database to the interface,
 and replaces an earlier Python/React app of the same name.
 
@@ -54,8 +54,8 @@ and replaces an earlier Python/React app of the same name.
 
 ## Performance
 
-Measured on a library of 189,922 tracks, against the Python/React app bc
-replaces (same database, same disk).
+Measured on a large test library, against the Python/React app bc replaces
+(same database, same disk). Smaller libraries are faster still.
 
 | | Previous app | bc |
 |---|---|---|
@@ -64,7 +64,7 @@ replaces (same database, same disk).
 | Track list | 500 rows, sorted in the browser | all rows, sorted on the server |
 | Search (`d`, `dub`, `dub techno`) | 280–520 ms | **25–41 ms** |
 | Scrolling the full list | — | 53–60 fps |
-| Rescan of 190k unchanged files | — | 0.71 s |
+| Rescan of the whole library, nothing changed | — | 0.71 s |
 | Similar tracks, typical / worst seed | 118 / 223 ms | **67 / 194 ms** |
 | Beatmatch phase error (PipeWire, real device) | — | −0.05 ms, 0 xruns |
 

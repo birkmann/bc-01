@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bc — bandcamp library &amp; dj tool for linux</title>
-<meta name="description" content="bc is a free, native Rust app for Linux that takes music from Bandcamp discovery to your DJ set: a fast library for 190,000 tracks, Bandcamp explore and downloads, analysis, playlists, automixed DJ sets and a real-time audio engine.">
+<meta name="description" content="bc is a free, native Rust app for Linux that takes music from Bandcamp discovery to your DJ set: a fast library for collections of any size, Bandcamp explore and downloads, analysis, playlists, automixed DJ sets and a real-time audio engine.">
 <meta name="theme-color" content="#F4F3EF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C0C0C" media="(prefers-color-scheme: dark)">
 <script>
@@ -54,7 +54,7 @@ try {
 <section class="wrap hero" id="top">
   <span class="label">bandcamp library &amp; dj tool for linux · v0.1.0 · free &amp; open source</span>
   <h1>From the dig<br>to the set.</h1>
-  <p class="lead">Find music on Bandcamp, keep it in a library that stays fast at 190,000 tracks, and mix it into DJ sets — one native app, written in Rust.</p>
+  <p class="lead">Find music on Bandcamp, keep it in a library that stays fast however large it grows, and mix it into DJ sets — one native app, written in Rust.</p>
   <div class="actions">
     <a class="pill pill-signal" href="#install">Install for Linux</a>
     <a class="pill pill-outline" href="https://github.com/birkmann/bc-01">View source</a>
@@ -64,12 +64,12 @@ try {
 <figure class="wrap shot shot-hero">
   <picture>
     <source srcset="assets/img/bc-home.webp" type="image/webp">
-    <img src="assets/img/bc-home.png" width="1360" height="860" alt="The bc home screen: the newest release in the library, latest additions, the all-time Top 10 and the player bar with a waveform.">
+    <img src="assets/img/bc-home.png" width="1800" height="1125" alt="The bc home screen with a demo library: the newest release, latest additions, the all-time Top 10 and the player bar with a waveform.">
   </picture>
 </figure>
 
 <section class="wrap proof" aria-label="Measured results">
-  <div><span class="num">13&nbsp;ms</span><span class="what">for a page of 200 tracks at row 74,000 of 190,000, sorted on the server</span></div>
+  <div><span class="num">13&nbsp;ms</span><span class="what">to fetch a page of tracks from deep in a large library, sorted on the server</span></div>
   <div><span class="num">1.5&nbsp;s</span><span class="what">from launch to a ready library — the Python app it replaces needed 110&nbsp;s</span></div>
   <div><span class="num">0.05&nbsp;ms</span><span class="what">beatmatch phase error, measured through PipeWire on real hardware, 0 xruns</span></div>
   <div><span class="num">kill&nbsp;-9</span><span class="what">a download killed mid-file resumes cleanly — never a truncated or untagged file</span></div>
@@ -78,7 +78,7 @@ try {
 <section class="wrap section" id="features">
   <h2>Everything between the find and the floor.</h2>
   <div class="grid features">
-    <article><span class="idx">01</span><h3>A library without limits</h3><p>Every row of 190,000 tracks, sorted and filtered on the server, full-text search in milliseconds and scrolling at 60&nbsp;fps.</p></article>
+    <article><span class="idx">01</span><h3>A library without limits</h3><p>Every track in one list, sorted and filtered on the server, full-text search in milliseconds and smooth scrolling.</p></article>
     <article><span class="idx">02</span><h3>Bandcamp, built in</h3><p>Search Bandcamp, browse tags and new arrivals, and stream a release before you keep it — without leaving the app.</p></article>
     <article><span class="idx">03</span><h3>Feed &amp; fans</h3><p>Follow artists and labels, walk the collections and wishlists of fans with your taste, and harvest new releases into an inbox.</p></article>
     <article><span class="idx">04</span><h3>Durable downloads</h3><p>A job queue with leases and crash recovery. Files are tagged, synced and renamed atomically, and checked against what you already have.</p></article>
@@ -91,14 +91,14 @@ try {
 
 <section class="wrap section split" id="library">
   <div class="copy">
-    <h2>190,000 tracks. No row cap.</h2>
+    <h2>Your whole collection. No row cap.</h2>
     <p>bc sorts, filters and searches on the server, so the list holds your whole collection — not the first 500 rows. Jump anywhere and the page is there before you notice it loading.</p>
     <p>Waveforms are measured on an absolute <span class="kbd">dB</span> scale, so a quiet master looks quiet, and drawn on the GPU with the playhead at your display's refresh rate.</p>
   </div>
   <figure class="shot shot-detail">
     <picture>
       <source srcset="assets/img/bc-tracks.webp" type="image/webp">
-      <img src="assets/img/bc-tracks.png" width="1800" height="1125" alt="The bc track list: 189,922 tracks with artist, album, time, date added and a waveform per row, tag filters in the sidebar and a playing mix in the player bar." loading="lazy">
+      <img src="assets/img/bc-tracks.png" width="1800" height="1125" alt="The bc track list with a demo library: title, artist, album, BPM, key, time, date added, plays and a waveform per row, with tag filters in the sidebar." loading="lazy">
     </picture>
   </figure>
 </section>
@@ -108,7 +108,7 @@ try {
     <figure class="shot">
       <picture>
         <source srcset="assets/img/bc-explore.webp" type="image/webp">
-        <img src="assets/img/bc-explore.png" width="1440" height="900" alt="Explore in bc: Bandcamp's new electronic arrivals as a grid of covers with filters for genre, sort and location." loading="lazy">
+        <img src="assets/img/bc-explore.png" width="1800" height="1125" alt="Explore in bc: new electronic arrivals as a grid of covers with filters for genre, sort and location (demo content)." loading="lazy">
       </picture>
     </figure>
     <div class="copy">
@@ -131,7 +131,7 @@ try {
   <figure class="shot shot-detail">
     <picture>
       <source srcset="assets/img/bc-sets.webp" type="image/webp">
-      <img src="assets/img/bc-sets.png" width="1440" height="900" alt="The Arrange view of a twelve-track DJ set: clips on two lanes with spectral waveforms, transition markers between them and a set overview strip." loading="lazy">
+      <img src="assets/img/bc-sets.png" width="1800" height="719" alt="The DJ Sets overview: four demo sets with cover mosaics, track counts, length and average BPM." loading="lazy">
     </picture>
   </figure>
 </section>
