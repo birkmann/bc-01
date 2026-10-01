@@ -1,0 +1,45 @@
+[package]
+name = "bc-engine"
+version = "0.1.0"
+edition = "2024"
+description = "Native playback host: cpal output, decode workers, PlayerSession, MPRIS, offline render."
+
+
+[features]
+default = ["mpris"]
+mpris = ["dep:souvlaki"]
+
+[dependencies]
+bc-types = { version = "0.1.0", path = "../bc-types" }
+bc-core = { version = "0.1.0", path = "../bc-core" }
+bc-db = { version = "0.1.0", path = "../bc-db" }
+bc-dsp = { version = "0.1.0", path = "../bc-dsp" }
+parking_lot = "0.12.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["sync", "rt", "macros", "time", "rt-multi-thread"] }
+tracing = "0.1.44"
+crossbeam-channel = "0.5.17"
+rtrb = "0.3.5"
+cpal = "0.18.2"
+symphonia = { version = "0.6.1", features = ["all"] }
+rubato = "4.0.0"
+memmap2 = "0.9.11"
+hound = "3.5.1"
+axum = "0.8.9"
+souvlaki = { version = "0.8.3", optional = true, default-features = false, features = ["use_zbus"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "blocking"] }
+bc-music = { version = "0.1.0", path = "../bc-music" }
+bc-recommend = { version = "0.1.0", path = "../bc-recommend" }
+bc-libcore = { version = "0.1.0", path = "../bc-libcore" }
+bc-library = { version = "0.1.0", path = "../bc-library" }
+bc-plist = { version = "0.1.0", path = "../bc-plist" }
+tokio-stream = "0.1.19"
+bytes = "1.12.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tower = { version = "0.5.3", features = ["util"] }
+http-body-util = "0.1.5"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }

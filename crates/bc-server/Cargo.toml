@@ -1,0 +1,55 @@
+[package]
+name = "bc-server"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["library", "jobs", "analysis", "recommend", "player", "bandcamp"]
+library = ["dep:bc-library", "dep:bc-libcore", "dep:bc-maint"]
+jobs = ["dep:bc-jobs"]
+analysis = ["jobs", "dep:bc-analysis"]
+recommend = ["dep:bc-recommend"]
+player = ["dep:bc-engine"]
+bandcamp = ["jobs", "dep:bc-bandcamp"]
+
+[[bin]]
+name = "bc-server"
+path = "src/main.rs"
+
+[dependencies]
+bc-library = { path = "../bc-library", optional = true }
+bc-libcore = { path = "../bc-libcore", optional = true }
+bc-maint = { path = "../bc-maint", optional = true }
+bc-jobs = { path = "../bc-jobs", optional = true }
+bc-analysis = { path = "../bc-analysis", optional = true }
+bc-recommend = { path = "../bc-recommend", optional = true }
+bc-engine = { path = "../bc-engine", optional = true }
+bc-bandcamp = { path = "../bc-bandcamp", optional = true }
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["ws", "macros", "http1", "tokio"] }
+bc-core = { version = "0.1.0", path = "../bc-core" }
+bc-db = { version = "0.1.0", path = "../bc-db" }
+bc-types = { version = "0.1.0", path = "../bc-types" }
+bytes = "1.12.1"
+futures-util = "0.3.34"
+hex = "0.4.3"
+mime_guess = "2.0.5"
+parking_lot = "0.12.5"
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+rand = "0.10.3"
+rust-embed = { version = "8.12.0", features = ["mime-guess", "include-exclude"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["full"] }
+tower-http = { version = "0.7.1", features = ["cors", "trace", "set-header", "compression-gzip", "compression-br"] }
+tracing = "0.1.44"
+which = "8.0.6"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tempfile = "3.27.0"
+tokio-tungstenite = "0.30.0"
+tower = { version = "0.5.3", features = ["util"] }

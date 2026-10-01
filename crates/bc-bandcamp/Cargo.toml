@@ -1,0 +1,72 @@
+[package]
+name = "bc-bandcamp"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+# Live Bandcamp contract tests (network). Excluded by default.
+live = []
+default = ["os-keyring"]
+os-keyring = ["dep:keyring"]
+
+[dependencies]
+async-stream = "0.3"
+async-trait = "0.1.92"
+axum = { version = "0.8.9", features = ["multipart"] }
+base64 = "0.23.1"
+bc-core = { version = "0.1.0", path = "../bc-core" }
+bc-db = { version = "0.1.0", path = "../bc-db" }
+bc-jobs = { version = "0.1.0", path = "../bc-jobs" }
+bc-libcore = { path = "../bc-libcore" }
+bc-maint = { path = "../bc-maint" }
+bc-scan = { path = "../bc-scan" }
+bc-types = { version = "0.1.0", path = "../bc-types" }
+bytes = "1.12.1"
+chrono = "0.4.45"
+csv = "1.4.0"
+futures = "0.3.34"
+hex = "0.4.3"
+libc = "0.2.189"
+lofty = "0.25.4"
+parking_lot = "0.12.5"
+percent-encoding = "2.3.2"
+rand = "0.10.3"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "gzip", "brotli", "deflate", "stream", "http2"] }
+scraper = "0.27.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+sha2 = "0.11.0"
+strsim = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-util = "0.7.19"
+tracing = "0.1.44"
+unicode-normalization = "0.1.25"
+url = "2.5.8"
+uuid = { version = "1.26.1", features = ["v4"] }
+zstd = "0.14.0"
+
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"], optional = true }
+fancy-regex = "0.14"
+unicode-general-category = "1.0"
+
+[[bin]]
+# Test fixture only (stand-in for the bandcamp-dl CLI); never shipped.
+name = "fake_bandcamp_dl"
+path = "src/bin/fake_bandcamp_dl.rs"
+test = false
+doc = false
+
+[[bin]]
+# Test fixture only: runs the download worker until killed (the kill -9 resume proof).
+name = "dl_harness"
+path = "src/bin/dl_harness.rs"
+test = false
+doc = false
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
+tempfile = "3.27.0"
+http = "1"
+tokio = { version = "1.53.1", features = ["full", "test-util"] }

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=bc
+GenericName=Bandcamp library manager and DJ tool
+Comment=Browse, play, mix and download your Bandcamp library
+Exec=bc-desktop
+Icon=bc
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=bandcamp;music;dj;library;
+StartupWMClass=bc
+Actions=quit;
+
+[Desktop Action quit]
+Name=Quit bc
+Exec=bc-desktop --quit

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" translate="no" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="google" content="notranslate" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#080808" />
+  <title>bc</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link data-trunk rel="copy-file" href="assets/icon.svg" />
+  <link data-trunk rel="copy-file" href="assets/manifest.webmanifest" />
+  <link data-trunk rel="copy-file" href="assets/brand/icon192.png" />
+  <link data-trunk rel="copy-file" href="assets/brand/icon512.png" />
+  <!-- "play on this device": bc-worklet host served from the app origin -->
+  <link data-trunk rel="copy-file" href="assets/bc-local.js" />
+  <link data-trunk rel="copy-file" href="../bc-worklet/js/player.js" />
+  <link data-trunk rel="copy-file" href="../bc-worklet/js/processor.js" />
+  <link data-trunk rel="copy-file" href="../bc-worklet/js/bc_worklet.wasm" />
+  <link data-trunk rel="copy-dir" href="assets/fonts" data-target-path="fonts" />
+  <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+  <link data-trunk rel="css" href="style/tokens.css" />
+  <link data-trunk rel="css" href="style/base.css" />
+  <link data-trunk rel="css" href="style/ds.css" />
+  <link data-trunk rel="css" href="style/shell.css" />
+  <link data-trunk rel="css" href="style/pages.css" />
+  <link data-trunk rel="css" href="style/pages-library.css" />
+  <link data-trunk rel="css" href="style/pages-people.css" />
+  <link data-trunk rel="css" href="style/pages-explore.css" />
+  <link data-trunk rel="css" href="style/pages-fans.css" />
+  <link data-trunk rel="css" href="style/pages-dj.css" />
+  <link data-trunk rel="css" href="style/pages-arrange.css" />
+  <link data-trunk rel="css" href="style/pages-system.css" />
+  <link data-trunk rel="rust" data-bin="bc-ui" data-wasm-opt="z" data-cargo-features="" />
+</head>
+<body></body>
+</html>

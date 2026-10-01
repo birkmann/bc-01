@@ -1,0 +1,34 @@
+[package]
+name = "bc-waveform"
+version = "0.1.0"
+edition = "2024"
+description = "Waveform data (.bcw2 format, streaming builder, mip pyramid, LRU store) and the WebGL2/Canvas2D renderer."
+
+[features]
+default = ["zstd", "store"]
+# zstd (de)compression of file blocks. Native only: raw blocks need no zstd.
+zstd = ["dep:zstd"]
+# std::fs LRU store + source hashing. Native only.
+store = ["dep:blake3"]
+# WebGL2 / Canvas2D renderer (wasm32).
+webgl = ["dep:web-sys", "dep:js-sys", "dep:wasm-bindgen"]
+
+[dependencies]
+bc-types = { path = "../bc-types" }
+bc-music = { path = "../bc-music" }
+thiserror = "2"
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "Window", "Document", "Element", "HtmlCanvasElement", "Event", "EventTarget",
+    "WebGl2RenderingContext", "WebGlProgram", "WebGlShader", "WebGlTexture",
+    "WebGlBuffer", "WebGlVertexArrayObject", "WebGlUniformLocation",
+    "CanvasRenderingContext2d", "ImageData",
+] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+zstd = { version = "0.13", optional = true }
+blake3 = { version = "1", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

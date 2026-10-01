@@ -1,0 +1,36 @@
+//! One module per legacy page (PLAN §10.2). Each exports its route components (explicit re-exports: the
+//! page modules also contain helper modules whose names must not collide).
+pub mod home;
+pub use home::{HomePage};
+pub mod tracks;
+pub use tracks::{TracksPage, LovedPage};
+pub mod albums;
+pub use albums::{AlbumsPage, AlbumDetailPage};
+pub mod artists;
+pub use artists::{ArtistsPage, ArtistDetailPage};
+pub mod labels;
+pub use labels::{LabelsPage, LabelDetailPage};
+pub mod tags;
+pub use tags::{TagsPage};
+pub mod explore;
+pub use explore::{ExplorePage, ExploreBandPage, ExploreReleasePage};
+pub mod feed;
+pub use feed::{FeedPage};
+pub mod fans;
+pub use fans::{FansPage};
+pub mod harvest;
+pub use harvest::{HarvestPage};
+pub mod downloads;
+pub use downloads::{DownloadsPage};
+pub mod tracklists;
+pub use tracklists::{TracklistsPage};
+pub mod playlists;
+pub use playlists::{PlaylistsPage, PlaylistDetailPage};
+pub mod sets;
+pub use sets::{SetsPage, SetDetailPage};
+pub mod analysis;
+pub use analysis::{AnalysisPage};
+pub mod cleanup;
+pub use cleanup::{BlacklistPanel, CleanupPage};
+pub mod settings;
+pub use settings::{SettingsPage};

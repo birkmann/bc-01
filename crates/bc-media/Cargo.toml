@@ -1,0 +1,33 @@
+[package]
+name = "bc-media"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bc-core = { path = "../bc-core" }
+bc-types = { path = "../bc-types" }
+axum = "0.8"
+bytes = "1"
+blurhash = "0.2"
+fast_image_resize = "5"
+futures = "0.3"
+httpdate = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
+lofty = "0.25"
+memmap2 = "0.9"
+parking_lot = "0.12"
+percent-encoding = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "fs", "io-util", "sync", "macros"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tracing = "0.1"
+unicode-normalization = "0.1"
+webp = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

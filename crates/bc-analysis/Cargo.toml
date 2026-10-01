@@ -1,0 +1,36 @@
+[package]
+name = "bc-analysis"
+version = "0.1.0"
+edition = "2024"
+description = "Streaming single-pass analysis: BS.1770 loudness, waveform, tempo/beats/downbeats/phrases, key, energy; pool + runner + HTTP router"
+
+[dependencies]
+bc-types = { version = "0.1.0", path = "../bc-types" }
+bc-core = { version = "0.1.0", path = "../bc-core" }
+bc-db = { version = "0.1.0", path = "../bc-db" }
+bc-music = { version = "0.1.0", path = "../bc-music" }
+bc-jobs = { version = "0.1.0", path = "../bc-jobs" }
+bc-libcore = { version = "0.1.0", path = "../bc-libcore" }
+bc-recommend = { version = "0.1.0", path = "../bc-recommend" }
+bc-waveform = { version = "0.1.0", path = "../bc-waveform" }
+symphonia = { version = "0.5", features = ["all"] }
+ebur128 = "0.1"
+realfft = "3"
+rayon = "1"
+libc = "0.2"
+thiserror = "2"
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+axum = { version = "0.8", features = ["json", "query"] }
+tower = "0.5"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+blake3 = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

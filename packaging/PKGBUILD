@@ -1,0 +1,59 @@
+# Maintainer: Rafael Birkmann <mail@rafaelbirkmann.de>
+# Local build of the bc-rust workspace from the repository checkout (this file lives in packaging/).
+pkgname=bc-rust
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Native Rust Bandcamp library manager and DJ tool (in-process server + audio engine, UI in a Chromium app window)'
+arch=('x86_64')
+url='https://github.com/birkmann/bc-01'
+license=('MIT')
+depends=('alsa-lib' 'openssl' 'dbus' 'ffmpeg')
+makedepends=('rust' 'cargo' 'trunk' 'binaryen' 'clang' 'pkgconf' 'wasm-bindgen')
+optdepends=('chromium: app window (or google-chrome / brave)' 'bandcamp-dl: alternative downloader backend')
+options=('!lto')
+# Not named bc: that is Arch's GNU calculator package and /usr/bin/bc.
+conflicts=()
+# The sources are the checkout itself: run `makepkg` from packaging/.
+source=()
+sha256sums=()
+
+_root() { cd "$startdir/.." && pwd; }
+
+prepare() {
+  cd "$(_root)"
+  rustup target add wasm32-unknown-unknown 2>/dev/null || true
+}
+
+build() {
+  cd "$(_root)"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$srcdir/target}"
+  export RUSTUP_TOOLCHAIN=stable
+  # 0. AudioWorklet host (bc-dsp as wasm) served next to the UI
+  crates/bc-worklet/scripts/build.sh
+  # 1. UI (Leptos, CSR) -> crates/bc-ui/dist, embedded by bc-server's rust-embed
+  export CARGO_PROFILE_RELEASE_OPT_LEVEL=z CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_PANIC=abort
+  ( cd crates/bc-ui && trunk build --release )
+  unset CARGO_PROFILE_RELEASE_OPT_LEVEL CARGO_PROFILE_RELEASE_LTO CARGO_PROFILE_RELEASE_CODEGEN_UNITS CARGO_PROFILE_RELEASE_PANIC
+  # 2. server + desktop shell + CLI (the embedded UI is picked up at compile time)
+  cargo build --release --locked -p bc-desktop -p bc-cli || cargo build --release -p bc-desktop -p bc-cli
+  # `bc-rust analyze ...` runs this helper from the same directory (gate, key-profile fit, energy calibration)
+  cargo build --release -p bc-analysis --bin bc-analysis-tool
+}
+
+check() {
+  cd "$(_root)"
+  cargo test --release -p bc-server -p bc-ui --lib || true
+}
+
+package() {
+  cd "$(_root)"
+  local t="${CARGO_TARGET_DIR:-$srcdir/target}/release"
+  install -Dm755 "$t/bc-desktop" "$pkgdir/usr/bin/bc-desktop"
+  [ -x "$t/bc" ] && install -Dm755 "$t/bc" "$pkgdir/usr/bin/bc-rust"
+  install -Dm755 "$t/bc-analysis-tool" "$pkgdir/usr/bin/bc-analysis-tool"
+  install -Dm644 packaging/bc.desktop "$pkgdir/usr/share/applications/bc.desktop"
+  install -Dm644 packaging/bc.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/bc.svg"
+  for s in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "packaging/icons/bc-$s.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/bc.png"
+  done
+}

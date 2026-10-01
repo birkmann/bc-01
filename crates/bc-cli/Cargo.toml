@@ -1,0 +1,27 @@
+[package]
+name = "bc-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "bc"
+path = "src/main.rs"
+
+[dependencies]
+bc-bandcamp = { path = "../bc-bandcamp" }
+bc-core = { path = "../bc-core" }
+bc-db = { path = "../bc-db" }
+bc-library = { path = "../bc-library" }
+bc-libcore = { path = "../bc-libcore" }
+bc-scan = { path = "../bc-scan" }
+bc-server = { path = "../bc-server" }
+bc-types = { path = "../bc-types" }
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,11 @@
+[build]
+target = "index.html"
+dist = "dist"
+no_sri = true
+
+[tools]
+# wasm-bindgen / wasm-opt are fetched by trunk into its cache (XDG_CACHE_HOME).
+
+[serve]
+address = "127.0.0.1"
+port = 8421

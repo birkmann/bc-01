@@ -1,0 +1,30 @@
+[package]
+name = "bc-recommend"
+version = "0.1.0"
+edition = "2024"
+description = "Recommenders (suggest-next, loved, similar), DJ-set pool/suggest/automix and similar playlists."
+
+[dependencies]
+axum = { version = "0.8.9", features = ["macros", "http1", "tokio", "json", "query"] }
+bc-core = { version = "0.1.0", path = "../bc-core" }
+bc-libcore = { path = "../bc-libcore" }
+bc-plist = { path = "../bc-plist" }
+bc-db = { version = "0.1.0", path = "../bc-db" }
+bc-music = { version = "0.1.0", path = "../bc-music" }
+bc-types = { version = "0.1.0", path = "../bc-types" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["rt", "macros", "sync", "time"] }
+tracing = "0.1.44"
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tempfile = "3.27.0"
+tower = { version = "0.5.3", features = ["util"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[[example]]
+name = "similar_timing"
+path = "examples/similar_timing.rs"

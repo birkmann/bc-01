@@ -1,0 +1,448 @@
+//! Planning a DJ blend: how long, at what tempo, with what on the outgoing.
+//!
+//! Exact port of `web/frontend/src/player/beatmatch.ts` (same numbers, same
+//! tolerances) plus the transition kind / quantise / phase-lock fields of the
+//! native engine. Pure arithmetic, so the shape of every transition is testable
+//! without audio; the mixer executes whatever [`BlendSpec`] comes out of here.
+//!
+//! Beatmatching is a *rate*: the incoming deck plays at `outgoing_bpm /
+//! incoming_bpm` so the two grids run at the same speed. Only tempos within a
+//! few percent are matched (half and double time count as the same tempo, as
+//! they do to a DJ); beyond that a plain echo-out sounds better than a warped record.
+
+use bc_types::player::{Entry, MixSettings, Quantise, TransitionKind};
+
+/// Tempos further apart than this are not matched: ~1 semitone un-locked.
+pub const SYNC_TOLERANCE: f64 = 0.06;
+/// A matched blend never runs shorter or longer than this, whatever the beats say.
+pub const BLEND_MIN_S: f64 = 8.0;
+pub const BLEND_MAX_S: f64 = 64.0;
+/// The plain (unmatched) end-of-track blend.
+pub const PLAIN_LENGTH_S: f64 = 4.0;
+/// How long the echo keeps ringing after the send closes before the deck is parked.
+pub const ECHO_TAIL_S: f64 = 4.0;
+pub const CUT_TAIL_S: f64 = 0.2;
+/// How fast "cut now" finishes a running blend.
+pub const CUT_S: f64 = 0.3;
+/// Seconds the incoming's tempo takes to glide back to 1.0 after a matched blend.
+pub const GLIDE_BACK_S: f64 = 60.0;
+/// A nudge / phase correction bends the rate by this much...
+pub const BEND_PCT: f64 = 0.04;
+/// ...for at most this long, however big the residual.
+pub const BEND_MAX_S: f64 = 2.0;
+/// The continuous phase-lock loop never moves the rate more than this.
+pub const PLL_MAX_TRIM: f64 = 0.003;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EchoSpec {
+    /// Send level into the echo bus.
+    pub send: f64,
+    /// Seconds before the end of the blend the send opens (and stays open).
+    pub hold_s: f64,
+    /// Ramp-up time of the send.
+    pub up_s: f64,
+    /// Tempo the echo repeats at (a dotted eighth of it).
+    pub bpm: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SyncSpec {
+    /// Playback rate for the incoming deck.
+    pub rate: f64,
+    pub key_lock: bool,
+    pub from_bpm: f64,
+    pub to_bpm: f64,
+    /// Keep the rate after the blend rather than gliding back to 1.
+    pub hold: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Curve {
+    Linear,
+    EqualPower,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlendSpec {
+    pub kind: TransitionKind,
+    /// Crossfade length in seconds.
+    pub length_s: f64,
+    pub curve: Curve,
+    /// Where the incoming track starts, in its own seconds.
+    pub incoming_start_s: f64,
+    pub echo: Option<EchoSpec>,
+    pub sync: Option<SyncSpec>,
+    /// How long after the crossfade the outgoing deck is left before parking.
+    pub park_tail_s: f64,
+    pub quantise: Quantise,
+    /// Continuous phase-lock loop after the initial bend.
+    pub phase_lock: bool,
+}
+
+impl BlendSpec {
+    /// This blend with a tempo match at `rate` (no key lock), for tests and tools.
+    pub fn with_sync(mut self, rate: f64) -> Self {
+        self.sync = Some(SyncSpec { rate, key_lock: false, from_bpm: 120.0, to_bpm: 120.0 * rate, hold: false });
+        self
+    }
+}
+
+/// A user skip: fast, but still an echo rather than a cut, and straight in at the drop.
+pub fn short_blend(out_bpm: Option<f64>, echo: bool, incoming_start_s: f64) -> BlendSpec {
+    BlendSpec {
+        kind: TransitionKind::Blend,
+        length_s: 1.2,
+        curve: Curve::Linear,
+        incoming_start_s,
+        echo: echo.then_some(EchoSpec { send: 0.7, hold_s: 0.6, up_s: 0.05, bpm: out_bpm }),
+        sync: None,
+        park_tail_s: if echo { ECHO_TAIL_S } else { CUT_TAIL_S },
+        quantise: Quantise::Off,
+        phase_lock: false,
+    }
+}
+
+/// A hard cut (declick only): used for track starts and previous/jump.
+pub fn cut_spec(incoming_start_s: f64) -> BlendSpec {
+    BlendSpec {
+        kind: TransitionKind::Cut,
+        length_s: 0.012,
+        curve: Curve::Linear,
+        incoming_start_s,
+        echo: None,
+        sync: None,
+        park_tail_s: CUT_TAIL_S,
+        quantise: Quantise::Off,
+        phase_lock: false,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Multiplier {
+    pub m: f64,
+    pub ratio: f64,
+}
+
+/// Straight, double or half time -- whichever brings the two tempos closest.
+pub fn choose_multiplier(out_bpm: f64, in_bpm: f64) -> Multiplier {
+    let mut best = Multiplier { m: 1.0, ratio: out_bpm / in_bpm };
+    for m in [2.0, 0.5] {
+        let ratio = out_bpm / (in_bpm * m);
+        if (ratio - 1.0).abs() < (best.ratio - 1.0).abs() {
+            best = Multiplier { m, ratio };
+        }
+    }
+    best
+}
+
+/// The rate the incoming deck should play at to run alongside the outgoing,
+/// or `None` when the tempos are too far apart to match.
+pub fn sync_rate(out_bpm_eff: Option<f64>, in_bpm: Option<f64>, tolerance: f64) -> Option<f64> {
+    let (o, i) = (out_bpm_eff?, in_bpm?);
+    if !(o > 0.0 && i > 0.0) {
+        return None;
+    }
+    let m = choose_multiplier(o, i);
+    if (m.ratio - 1.0).abs() > tolerance {
+        return None;
+    }
+    Some(js_round(m.ratio * 1e5) / 1e5)
+}
+
+/// `Math.round` (ties toward +inf), to stay bit-identical with the browser planner.
+fn js_round(x: f64) -> f64 {
+    (x + 0.5).floor()
+}
+
+/// How long a matched blend should run: the chosen number of beats, but never
+/// past the end of the outgoing track or the end of the incoming's intro, and
+/// always long enough to hear and short enough to still be a transition.
+pub fn blend_length(length_beats: f64, out_bpm_eff: Option<f64>, out_remaining_s: f64, in_s: f64) -> f64 {
+    let beats_s = match out_bpm_eff {
+        Some(b) if b > 0.0 => length_beats * 60.0 / b,
+        _ => BLEND_MAX_S,
+    };
+    let wanted = beats_s.min(out_remaining_s).min(if in_s > 0.0 { in_s } else { BLEND_MAX_S });
+    wanted.clamp(BLEND_MIN_S, BLEND_MAX_S)
+}
+
+/// When the blend must start so it fits before the outgoing ends: at the outro
+/// if that leaves room, else early enough for the whole length.
+pub fn trigger_point(out_s: f64, dur_s: f64, length_s: f64) -> f64 {
+    0f64.max(out_s.min(dur_s - length_s - 1.0))
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OutgoingFacts {
+    pub bpm: Option<f64>,
+    /// The deck's current playback rate: a matched track carries its tempo on.
+    pub rate: f64,
+    pub dur_s: f64,
+    /// Where its outro starts (mix-out point); `None` = unknown.
+    pub out_s: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IncomingFacts {
+    pub bpm: Option<f64>,
+    /// Where its intro ends (mix-in point).
+    pub in_s: f64,
+}
+
+/// The end-of-track blend between these two tracks under these settings.
+pub fn plan_blend(out: &OutgoingFacts, inc: &IncomingFacts, s: &MixSettings) -> BlendSpec {
+    let out_bpm_eff = match out.bpm {
+        Some(b) if b > 0.0 => Some(b * if out.rate != 0.0 { out.rate } else { 1.0 }),
+        _ => None,
+    };
+    let rate = if s.sync { sync_rate(out_bpm_eff, inc.bpm, SYNC_TOLERANCE) } else { None };
+    let out_start = out.out_s.unwrap_or_else(|| 0f64.max(out.dur_s - PLAIN_LENGTH_S - 1.0));
+    let out_remaining_s = 0f64.max(out.dur_s - out_start);
+    let intro = s.entry == Entry::Intro;
+
+    // Coming in at the drop, the incoming's intro does not bound the blend.
+    let length_s = if rate.is_some() {
+        blend_length(s.length_beats as f64, out_bpm_eff, out_remaining_s, if intro { inc.in_s } else { 0.0 })
+    } else {
+        PLAIN_LENGTH_S
+    };
+
+    let echo = s.echo.then_some(EchoSpec { send: 0.65, hold_s: 3.0, up_s: 0.3, bpm: out_bpm_eff });
+    let sync = match (rate, out_bpm_eff, inc.bpm) {
+        (Some(rate), Some(o), Some(i)) => {
+            Some(SyncSpec { rate, key_lock: s.key_lock, from_bpm: i, to_bpm: o, hold: s.hold_tempo })
+        }
+        _ => None,
+    };
+
+    let mut spec = BlendSpec {
+        kind: s.transition,
+        length_s,
+        curve: if rate.is_some() { Curve::EqualPower } else { Curve::Linear },
+        // At the drop: straight in where the main sounds start, matched or not.
+        // From the intro (matched only): the intro runs under the outgoing's
+        // outro and ends as the outgoing goes.
+        incoming_start_s: if rate.is_some() && intro { 0f64.max(inc.in_s - length_s) } else { inc.in_s },
+        echo,
+        sync,
+        park_tail_s: if echo.is_some() { ECHO_TAIL_S } else { CUT_TAIL_S },
+        quantise: s.quantise,
+        phase_lock: s.phase_lock,
+    };
+    shape_for_kind(&mut spec, out_bpm_eff);
+    spec
+}
+
+/// Adjust a planned blend for the real transition types of the native engine.
+/// `Blend` is left exactly as the browser planner made it.
+fn shape_for_kind(spec: &mut BlendSpec, out_bpm_eff: Option<f64>) {
+    match spec.kind {
+        TransitionKind::Blend | TransitionKind::BassSwap | TransitionKind::Filter => {}
+        TransitionKind::EchoOut => {
+            let beat = out_bpm_eff.map(|b| 60.0 / b).unwrap_or(0.5);
+            // Two bars of the outgoing, bounded: the echo does the leaving.
+            spec.length_s = (8.0 * beat).clamp(2.0, 6.0);
+            spec.curve = Curve::EqualPower;
+            let bpm = out_bpm_eff;
+            spec.echo = Some(EchoSpec { send: 0.7, hold_s: spec.length_s, up_s: 0.05, bpm });
+            spec.park_tail_s = ECHO_TAIL_S;
+        }
+        TransitionKind::Cut => {
+            spec.length_s = 0.012;
+            spec.curve = Curve::Linear;
+            spec.park_tail_s = if spec.echo.is_some() { ECHO_TAIL_S } else { CUT_TAIL_S };
+            if let Some(e) = spec.echo.as_mut() {
+                e.hold_s = 0.4;
+                e.up_s = 0.02;
+                e.send = 0.7;
+            }
+        }
+    }
+}
+
+/// How long a track plays when it starts at `start_s` and is moved on after
+/// `max_play_s` (`None` = when it ends) -- `effectiveLengthMs` of the planner.
+pub fn effective_length_ms(duration_ms: Option<f64>, start_s: f64, max_play_s: Option<f64>) -> f64 {
+    let Some(d) = duration_ms else { return 0.0 };
+    let left = 0f64.max(d - start_s * 1000.0);
+    match max_play_s {
+        None => left,
+        Some(m) => left.min(m * 1000.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: f64, b: f64, eps: f64) {
+        assert!((a - b).abs() < eps, "{a} != {b}");
+    }
+
+    #[test]
+    fn choose_multiplier_cases() {
+        assert_eq!(choose_multiplier(128.0, 64.0), Multiplier { m: 2.0, ratio: 1.0 });
+        assert_eq!(choose_multiplier(70.0, 140.0).m, 0.5);
+        assert_eq!(choose_multiplier(128.0, 127.0).m, 1.0);
+    }
+
+    #[test]
+    fn sync_rate_matches_within_tolerance() {
+        close(sync_rate(Some(128.0), Some(126.0), SYNC_TOLERANCE).unwrap(), 1.01587, 1e-4);
+        close(sync_rate(Some(126.0), Some(128.0), SYNC_TOLERANCE).unwrap(), 0.98438, 1e-4);
+    }
+
+    #[test]
+    fn sync_rate_refuses_far_tempos() {
+        assert_eq!(sync_rate(Some(128.0), Some(140.0), SYNC_TOLERANCE), None);
+        assert_eq!(sync_rate(Some(128.0), Some(118.0), SYNC_TOLERANCE), None);
+    }
+
+    #[test]
+    fn sync_rate_half_and_double_time() {
+        assert_eq!(sync_rate(Some(128.0), Some(64.0), SYNC_TOLERANCE), Some(1.0));
+        assert_eq!(sync_rate(Some(87.0), Some(174.0), SYNC_TOLERANCE), Some(1.0));
+    }
+
+    #[test]
+    fn sync_rate_needs_both() {
+        assert_eq!(sync_rate(None, Some(128.0), SYNC_TOLERANCE), None);
+        assert_eq!(sync_rate(Some(128.0), None, SYNC_TOLERANCE), None);
+        assert_eq!(sync_rate(Some(0.0), Some(128.0), SYNC_TOLERANCE), None);
+    }
+
+    #[test]
+    fn blend_length_is_chosen_beats_at_outgoing_tempo() {
+        assert_eq!(blend_length(32.0, Some(128.0), 60.0, 40.0), 15.0);
+    }
+
+    #[test]
+    fn blend_length_never_outruns_outgoing_or_intro() {
+        assert_eq!(blend_length(64.0, Some(128.0), 12.0, 40.0), 12.0);
+        assert_eq!(blend_length(64.0, Some(128.0), 60.0, 10.0), 10.0);
+    }
+
+    #[test]
+    fn blend_length_clamps() {
+        assert_eq!(blend_length(16.0, Some(200.0), 60.0, 40.0), BLEND_MIN_S);
+        assert_eq!(blend_length(64.0, Some(40.0), 300.0, 200.0), BLEND_MAX_S);
+        assert_eq!(blend_length(32.0, Some(128.0), 3.0, 40.0), BLEND_MIN_S);
+    }
+
+    #[test]
+    fn blend_length_ignores_unknown_intro() {
+        assert_eq!(blend_length(32.0, Some(128.0), 60.0, 0.0), 15.0);
+    }
+
+    #[test]
+    fn trigger_point_cases() {
+        assert_eq!(trigger_point(300.0, 330.0, 15.0), 300.0);
+        assert_eq!(trigger_point(320.0, 330.0, 15.0), 314.0);
+    }
+
+    fn out_facts() -> OutgoingFacts {
+        OutgoingFacts { bpm: Some(128.0), rate: 1.0, dur_s: 360.0, out_s: Some(330.0) }
+    }
+
+    #[test]
+    fn plan_blend_matches_tempo_and_comes_in_at_drop() {
+        let spec = plan_blend(&out_facts(), &IncomingFacts { bpm: Some(126.0), in_s: 30.0 }, &MixSettings::default());
+        close(spec.sync.unwrap().rate, 1.01587, 1e-4);
+        assert!(!spec.sync.unwrap().key_lock);
+        assert_eq!(spec.curve, Curve::EqualPower);
+        assert_eq!(spec.length_s, 15.0);
+        assert_eq!(spec.incoming_start_s, 30.0);
+        assert_eq!(spec.echo.unwrap().bpm, Some(128.0));
+    }
+
+    #[test]
+    fn plan_blend_can_run_the_intro_under_the_outro() {
+        let s = MixSettings { entry: Entry::Intro, ..Default::default() };
+        let spec = plan_blend(&out_facts(), &IncomingFacts { bpm: Some(126.0), in_s: 30.0 }, &s);
+        assert_eq!(spec.length_s, 15.0);
+        assert_eq!(spec.incoming_start_s, 15.0);
+    }
+
+    #[test]
+    fn plan_blend_falls_back_to_plain_when_far_apart() {
+        let spec = plan_blend(&out_facts(), &IncomingFacts { bpm: Some(100.0), in_s: 30.0 }, &MixSettings::default());
+        assert!(spec.sync.is_none());
+        assert_eq!(spec.curve, Curve::Linear);
+        assert_eq!(spec.length_s, 4.0);
+        assert_eq!(spec.incoming_start_s, 30.0);
+    }
+
+    #[test]
+    fn plan_blend_honours_switches_independently() {
+        let inc = IncomingFacts { bpm: Some(126.0), in_s: 30.0 };
+        let no_echo = plan_blend(&out_facts(), &inc, &MixSettings { echo: false, ..Default::default() });
+        assert!(no_echo.echo.is_none());
+        assert!(no_echo.sync.is_some());
+        assert!(no_echo.park_tail_s < 1.0);
+
+        let no_sync = plan_blend(&out_facts(), &inc, &MixSettings { sync: false, ..Default::default() });
+        assert!(no_sync.sync.is_none());
+        assert!(no_sync.echo.is_some());
+
+        let locked = plan_blend(
+            &out_facts(),
+            &inc,
+            &MixSettings { key_lock: true, hold_tempo: true, ..Default::default() },
+        );
+        assert!(locked.sync.unwrap().key_lock);
+        assert!(locked.sync.unwrap().hold);
+    }
+
+    #[test]
+    fn plan_blend_carries_matched_tempo_to_next_plan() {
+        let out = OutgoingFacts { rate: 1.02, ..out_facts() };
+        let spec = plan_blend(&out, &IncomingFacts { bpm: Some(130.56), in_s: 30.0 }, &MixSettings::default());
+        close(spec.sync.unwrap().rate, 1.0, 1e-3);
+        close(spec.sync.unwrap().to_bpm, 130.56, 1e-2);
+    }
+
+    #[test]
+    fn plan_blend_intro_shorter_than_blend_starts_at_zero() {
+        let s = MixSettings { entry: Entry::Intro, ..Default::default() };
+        let spec = plan_blend(&out_facts(), &IncomingFacts { bpm: Some(128.0), in_s: 10.0 }, &s);
+        assert_eq!(spec.length_s, 10.0);
+        assert_eq!(spec.incoming_start_s, 0.0);
+    }
+
+    #[test]
+    fn plan_blend_at_drop_short_intro_does_not_shorten() {
+        let spec = plan_blend(&out_facts(), &IncomingFacts { bpm: Some(128.0), in_s: 10.0 }, &MixSettings::default());
+        assert_eq!(spec.length_s, 15.0);
+        assert_eq!(spec.incoming_start_s, 10.0);
+    }
+
+    #[test]
+    fn short_blend_is_a_quick_echo_out() {
+        let s = short_blend(Some(128.0), true, 0.0);
+        assert!(s.length_s < 2.0);
+        assert_eq!(s.echo.unwrap().bpm, Some(128.0));
+        assert!(short_blend(Some(128.0), false, 0.0).echo.is_none());
+        assert_eq!(short_blend(Some(128.0), true, 32.0).incoming_start_s, 32.0);
+    }
+
+    #[test]
+    fn effective_length_counts_start_and_pace_limit() {
+        assert_eq!(effective_length_ms(Some(360_000.0), 0.0, None), 360_000.0);
+        assert_eq!(effective_length_ms(Some(360_000.0), 30.0, None), 330_000.0);
+        assert_eq!(effective_length_ms(Some(360_000.0), 30.0, Some(240.0)), 240_000.0);
+        assert_eq!(effective_length_ms(Some(200_000.0), 30.0, Some(240.0)), 170_000.0);
+        assert_eq!(effective_length_ms(None, 30.0, Some(240.0)), 0.0);
+    }
+
+    #[test]
+    fn kinds_shape_the_plan() {
+        let inc = IncomingFacts { bpm: Some(128.0), in_s: 30.0 };
+        let cut = plan_blend(&out_facts(), &inc, &MixSettings { transition: TransitionKind::Cut, ..Default::default() });
+        assert!(cut.length_s < 0.05);
+        let eo = plan_blend(&out_facts(), &inc, &MixSettings { transition: TransitionKind::EchoOut, ..Default::default() });
+        assert!(eo.length_s >= 2.0 && eo.length_s <= 6.0);
+        assert!(eo.echo.is_some());
+        let bs = plan_blend(&out_facts(), &inc, &MixSettings { transition: TransitionKind::BassSwap, ..Default::default() });
+        assert_eq!(bs.length_s, 15.0);
+    }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "bc-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "bc desktop app: in-process bc-server + audio engine, UI in a Chromium app window, tray, single instance."
+
+[dependencies]
+bc-core = { path = "../bc-core" }
+bc-server = { path = "../bc-server" }
+bc-types = { path = "../bc-types" }
+anyhow = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal", "macros"] }
+tracing = "0.1"
+notify-rust = "4"
+ksni = "0.3"
+libc = "0.2"

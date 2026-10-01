@@ -1,0 +1,13 @@
+[package]
+name = "bc-worklet"
+version = "0.1.0"
+edition = "2024"
+description = "bc-dsp compiled to wasm32 for a browser AudioWorklet (play on this device), with JS glue."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bc-dsp = { version = "0.1.0", path = "../bc-dsp" }
+bc-types = { version = "0.1.0", path = "../bc-types" }
+rtrb = "0.3.5"

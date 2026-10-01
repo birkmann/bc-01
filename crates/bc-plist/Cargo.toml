@@ -1,0 +1,29 @@
+[package]
+name = "bc-plist"
+version = "0.1.0"
+edition = "2024"
+description = "Workstream 1: playlists, DJ-set storage CRUD, exports"
+
+[dependencies]
+bc-core = { path = "../bc-core" }
+bc-db = { path = "../bc-db" }
+bc-libcore = { path = "../bc-libcore" }
+bc-music = { path = "../bc-music" }
+bc-types = { path = "../bc-types" }
+axum = "0.8"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+csv = "1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util", "sync", "macros", "time"] }
+tracing = "0.1"
+crc32fast = "1"
+
+[dev-dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

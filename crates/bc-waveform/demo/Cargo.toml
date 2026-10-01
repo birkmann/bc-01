@@ -1,0 +1,16 @@
+# Browser smoke page for the WebGL2/Canvas2D renderer (not a workspace member).
+# Build: trunk build (see e2e/waveform-smoke.mjs); detached from the workspace on purpose.
+[package]
+name = "bc-waveform-demo"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+bc-waveform = { path = "..", default-features = false, features = ["webgl"] }
+bc-music = { path = "../../bc-music" }
+bc-types = { path = "../../bc-types" }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "Location", "CssStyleDeclaration", "HtmlElement"] }
+js-sys = "0.3"

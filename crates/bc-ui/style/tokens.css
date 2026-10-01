@@ -1,0 +1,132 @@
+/*
+  Design tokens (PLAN §10.1). Every visual token is a runtime CSS variable.
+  The Rust source of truth is bc_types::theme: the UI writes the active
+  ThemeSpec's overrides inline on <html> (see src/theme.rs), so a theme switch
+  never needs a rebuild. The values below are the built-in Dark/Light defaults
+  (identical to bc_types::theme::base_colors) so first paint is correct before
+  any script runs.
+*/
+:root {
+  color-scheme: dark;
+  --color-surface-0: #080808;
+  --color-surface-1: #0c0c0c;
+  --color-surface-2: #141414;
+  --color-surface-3: #1a1a1a;
+  --color-surface-4: #252525;
+  --color-line-subtle: #1f1f1f;
+  --color-line: #2b2b2b;
+  --color-line-strong: #454545;
+  --color-ink: #f0f0f0;
+  --color-ink-muted: #a8a8a8;
+  --color-ink-faint: #7c7c7c;
+  --color-ink-invert: #0c0c0c;
+  --color-accent: #01ff95;
+  --color-accent-hi: #66ffbe;
+  --color-accent-lo: #00c974;
+  --color-accent-ink: #001a10;
+  --color-accent-hover: #4dffb1;
+  --color-danger-hover: #e03a3a;
+  --color-danger-ink: #ffffff;
+  --color-ok: #21c07a;
+  --color-warn: #c98500;
+  --color-danger: #ff4444;
+  --color-info: #3987e5;
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+
+  /* Inter for text, JetBrains Mono (tabular) for data, display for signage only. */
+  --font-sans: 'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-display: var(--font-sans);
+
+  --type-scale: 1;
+  --radius-scale: 1;
+  --text-4xs: calc(0.5625rem * var(--type-scale));
+  --text-3xs: calc(0.625rem * var(--type-scale));
+  --text-2xs: calc(0.6875rem * var(--type-scale));
+  --text-xs: calc(0.75rem * var(--type-scale));
+  --text-sm: calc(0.8125rem * var(--type-scale));
+  --text-base: calc(0.875rem * var(--type-scale));
+  --text-md: calc(0.9375rem * var(--type-scale));
+  --text-lg: calc(1.125rem * var(--type-scale));
+  --text-xl: calc(1.25rem * var(--type-scale));
+  --text-2xl: calc(1.5rem * var(--type-scale));
+  --text-3xl: calc(1.75rem * var(--type-scale));
+  --text-4xl: calc(2.125rem * var(--type-scale));
+
+  --radius-sm: calc(0.25rem * var(--radius-scale));
+  --radius-md: calc(0.375rem * var(--radius-scale));
+  --radius-lg: calc(0.5rem * var(--radius-scale));
+  --radius-xl: calc(0.75rem * var(--radius-scale));
+  --radius-pill: 999px;
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+
+  --row-h: 36px;            /* density: compact 28 / default 36 / comfortable 44 (set by data-density) */
+  --touch: 44px;
+
+  --shadow-panel: 0 12px 32px rgb(0 0 0 / 0.5);
+  --shadow-pop: 0 6px 18px rgb(0 0 0 / 0.42);
+  --glow: 0 0 0 1px var(--color-accent), 0 0 14px color-mix(in srgb, var(--color-accent) 45%, transparent);
+
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 320ms;
+
+  --sidebar-w: 232px;
+  --rail-w: 56px;
+  --player-h: 104px;
+  --topbar-h: 48px;         /* panel / drawer heads */
+  --header-h: 40px;         /* app header */
+  --accent-art: var(--color-accent); /* optional album-art accent override */
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-surface-0: #e6e6e6;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f6f6f6;
+  --color-surface-3: #fcfcfc;
+  --color-surface-4: #e4e4e4;
+  --color-line-subtle: #e8e8e8;
+  --color-line: #d5d5d5;
+  --color-line-strong: #a8a8a8;
+  --color-ink: #1a1a1a;
+  --color-ink-muted: #4f4f4f;
+  --color-ink-faint: #757575;
+  --color-ink-invert: #ffffff;
+  --color-accent: #007a4d;
+  --color-accent-hi: #009862;
+  --color-accent-lo: #005c3a;
+  --color-accent-ink: #ffffff;
+  --color-accent-hover: #005c3a;
+  --color-danger-hover: #b31f29;
+  --color-danger-ink: #ffffff;
+  --color-ok: #147a57;
+  --color-warn: #9a6700;
+  --color-danger: #d1242f;
+  --color-info: #0969da;
+  --shadow-panel: 0 12px 32px rgb(0 0 0 / 0.16);
+  --shadow-pop: 0 6px 18px rgb(0 0 0 / 0.12);
+}
+
+:root[data-density='compact'] { --row-h: 28px; }
+:root[data-density='comfortable'] { --row-h: 44px; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+
+/* Bundled variable fonts (latin subsets; OFL): Inter for text, JetBrains Mono for data. */
+@font-face { font-family: 'Inter Variable'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Inter Variable'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('/fonts/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'JetBrains Mono Variable'; font-style: normal; font-display: swap; font-weight: 100 800;
+  src: url('/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }

@@ -1,0 +1,4 @@
+/target
+crates/bc-ui/dist
+e2e/node_modules
+.vscode/

@@ -1,0 +1,8 @@
+{
+  "name": "bc-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Playwright harness: screenshots of every page at 375/768/1440 and perf probes. Run `npm install` here first.",
+  "scripts": { "shots": "node shots.mjs", "perf": "node perf.mjs" },
+  "dependencies": { "playwright-core": "^1" }
+}

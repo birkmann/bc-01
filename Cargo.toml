@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Rafael Birkmann"]
+repository = "https://github.com/birkmann/bc-01"
+rust-version = "1.85"
+
+[profile.dev]
+opt-level = 1            # audio DSP and analysis are unusable at opt-level 0
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

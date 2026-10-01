@@ -1,0 +1,9 @@
+[package]
+name = "bc-music"
+version = "0.1.0"
+edition = "2024"
+description = "Pure music logic shared by server, UI (wasm) and engine: camelot, setmath, beat grids, mix points, automix. No I/O."
+
+[dependencies]
+bc-types = { version = "0.1.0", path = "../bc-types" }
+serde = { version = "1.0.229", features = ["derive"] }

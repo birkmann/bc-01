@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bc — bandcamp library &amp; dj tool for linux</title>
+<meta name="description" content="bc is a free, native Rust app for Linux that takes music from Bandcamp discovery to your DJ set: a fast library for 190,000 tracks, Bandcamp explore and downloads, analysis, playlists, automixed DJ sets and a real-time audio engine.">
+<meta name="theme-color" content="#F4F3EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C0C0C" media="(prefers-color-scheme: dark)">
+<script>
+// Apply a saved theme before first paint; without one the system setting decides.
+try {
+  var t = localStorage.getItem('theme');
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+} catch (e) {}
+</script>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/img/app-icon.png">
+<link rel="preload" href="assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="bc — bandcamp library &amp; dj tool for linux">
+<meta property="og:description" content="From the dig to the set: Bandcamp discovery and downloads, a library without row caps, analysis and automixed DJ sets. Native Rust, free and open source.">
+<meta property="og:image" content="assets/img/og.png">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <nav class="wrap nav" aria-label="Main">
+    <a class="lockup" href="#top" aria-label="bc home">
+      <svg class="mark" viewBox="0 0 100 100" fill="none" aria-hidden="true"><circle cx="50" cy="50" r="36" stroke="currentColor" stroke-width="9"/><circle cx="50" cy="50" r="17" fill="#01FF95"/></svg>
+      <span class="wordmark">BC</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#bandcamp">Bandcamp</a>
+      <a href="#sets">DJ sets</a>
+      <a href="https://github.com/birkmann/bc-01">Source</a>
+      <button class="theme-toggle" type="button" aria-label="Dark mode" aria-pressed="false">
+        <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+      </button>
+      <a class="pill pill-ink" href="#install">Install</a>
+    </div>
+  </nav>
+</header>
+
+<main id="main">
+
+<section class="wrap hero" id="top">
+  <span class="label">bandcamp library &amp; dj tool for linux · v0.1.0 · free &amp; open source</span>
+  <h1>From the dig<br>to the set.</h1>
+  <p class="lead">Find music on Bandcamp, keep it in a library that stays fast at 190,000 tracks, and mix it into DJ sets — one native app, written in Rust.</p>
+  <div class="actions">
+    <a class="pill pill-signal" href="#install">Install for Linux</a>
+    <a class="pill pill-outline" href="https://github.com/birkmann/bc-01">View source</a>
+  </div>
+</section>
+
+<figure class="wrap shot shot-hero">
+  <picture>
+    <source srcset="assets/img/bc-home.webp" type="image/webp">
+    <img src="assets/img/bc-home.png" width="1360" height="860" alt="The bc home screen: the newest release in the library, latest additions, the all-time Top 10 and the player bar with a waveform.">
+  </picture>
+</figure>
+
+<section class="wrap proof" aria-label="Measured results">
+  <div><span class="num">13&nbsp;ms</span><span class="what">for a page of 200 tracks at row 74,000 of 190,000, sorted on the server</span></div>
+  <div><span class="num">1.5&nbsp;s</span><span class="what">from launch to a ready library — the Python app it replaces needed 110&nbsp;s</span></div>
+  <div><span class="num">0.05&nbsp;ms</span><span class="what">beatmatch phase error, measured through PipeWire on real hardware, 0 xruns</span></div>
+  <div><span class="num">kill&nbsp;-9</span><span class="what">a download killed mid-file resumes cleanly — never a truncated or untagged file</span></div>
+</section>
+
+<section class="wrap section" id="features">
+  <h2>Everything between the find and the floor.</h2>
+  <div class="grid features">
+    <article><span class="idx">01</span><h3>A library without limits</h3><p>Every row of 190,000 tracks, sorted and filtered on the server, full-text search in milliseconds and scrolling at 60&nbsp;fps.</p></article>
+    <article><span class="idx">02</span><h3>Bandcamp, built in</h3><p>Search Bandcamp, browse tags and new arrivals, and stream a release before you keep it — without leaving the app.</p></article>
+    <article><span class="idx">03</span><h3>Feed &amp; fans</h3><p>Follow artists and labels, walk the collections and wishlists of fans with your taste, and harvest new releases into an inbox.</p></article>
+    <article><span class="idx">04</span><h3>Durable downloads</h3><p>A job queue with leases and crash recovery. Files are tagged, synced and renamed atomically, and checked against what you already have.</p></article>
+    <article><span class="idx">05</span><h3>Analysis</h3><p>Tempo, beats and downbeats, Camelot key, energy, real EBU R128 loudness and a three-band waveform for every track.</p></article>
+    <article><span class="idx">06</span><h3>Player</h3><p>Gapless playback through a native real-time engine with EQ, filter, echo and limiter — plus media keys and a tray icon.</p></article>
+    <article><span class="idx">07</span><h3>DJ sets</h3><p>Plan a set, let automix order it, fine-tune each transition on a timeline and render the result to MP3 or WAV.</p></article>
+    <article><span class="idx">08</span><h3>Recommendations</h3><p>Next up, similar tracks and taste: three recommenders that run locally on your own library and listening.</p></article>
+  </div>
+</section>
+
+<section class="wrap section split" id="library">
+  <div class="copy">
+    <h2>190,000 tracks. No row cap.</h2>
+    <p>bc sorts, filters and searches on the server, so the list holds your whole collection — not the first 500 rows. Jump anywhere and the page is there before you notice it loading.</p>
+    <p>Waveforms are measured on an absolute <span class="kbd">dB</span> scale, so a quiet master looks quiet, and drawn on the GPU with the playhead at your display's refresh rate.</p>
+  </div>
+  <figure class="shot shot-detail">
+    <picture>
+      <source srcset="assets/img/bc-tracks.webp" type="image/webp">
+      <img src="assets/img/bc-tracks.png" width="1800" height="1125" alt="The bc track list: 189,922 tracks with artist, album, time, date added and a waveform per row, tag filters in the sidebar and a playing mix in the player bar." loading="lazy">
+    </picture>
+  </figure>
+</section>
+
+<section class="dark" id="bandcamp">
+  <div class="wrap section split split-reverse">
+    <figure class="shot">
+      <picture>
+        <source srcset="assets/img/bc-explore.webp" type="image/webp">
+        <img src="assets/img/bc-explore.png" width="1440" height="900" alt="Explore in bc: Bandcamp's new electronic arrivals as a grid of covers with filters for genre, sort and location." loading="lazy">
+      </picture>
+    </figure>
+    <div class="copy">
+      <h2>Dig on Bandcamp. Keep what you love.</h2>
+      <p>Explore searches Bandcamp and browses its tag pages. The Feed follows the artists and labels you care about, Fans opens the collections of people who buy what you buy, and anything you like goes to the download queue.</p>
+      <p>Requests are rate-limited and cached, and every response is checked — Bandcamp reports some errors with a success status, and bc doesn't fall for it.</p>
+      <ul class="tags">
+        <li>Explore</li><li>Feed</li><li>Fans</li><li>Harvest</li><li>Wishlists</li><li>Tracklists</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="wrap section split" id="sets">
+  <div class="copy">
+    <h2>Plan a set. Let it mix.</h2>
+    <p>Put tracks in a pool and <span class="kbd">Automix</span> orders them by harmonic key and tempo and places mix points on phrase boundaries. Arrange lays the set out on two lanes: drag a clip edge to trim it, drag a transition to change how long it blends.</p>
+    <p>Play it live with the planner — up next, wishes and auto-fill — or render the whole set to a file.</p>
+  </div>
+  <figure class="shot shot-detail">
+    <picture>
+      <source srcset="assets/img/bc-sets.webp" type="image/webp">
+      <img src="assets/img/bc-sets.png" width="1440" height="900" alt="The Arrange view of a twelve-track DJ set: clips on two lanes with spectral waveforms, transition markers between them and a set overview strip." loading="lazy">
+    </picture>
+  </figure>
+</section>
+
+<section class="wrap section" id="stack">
+  <h2>Rust, all the way down.</h2>
+  <p class="lead narrow">One workspace of 23 crates, the interface included. The desktop app runs the server in-process and shows the UI in a Chromium app window; the same UI serves your phone and other browsers on your network, with device pairing.</p>
+  <ul class="grid hardware">
+    <li><span class="hw">Leptos interface, compiled to WebAssembly</span><span class="proto">bc-ui</span></li>
+    <li><span class="hw">axum server with a typed WebSocket hub</span><span class="proto">bc-server</span></li>
+    <li><span class="hw">SQLite in WAL mode, FTS5 search, one writer</span><span class="proto">bc-db</span></li>
+    <li><span class="hw">Real-time audio engine on cpal, MPRIS</span><span class="proto">bc-engine</span></li>
+    <li><span class="hw">Decks, EQ, filters, echo, key lock</span><span class="proto">bc-dsp · native + wasm</span></li>
+    <li><span class="hw">Tempo, key, loudness, waveforms</span><span class="proto">bc-analysis</span></li>
+    <li><span class="hw">GPU waveforms, WebGL2 with Canvas2D fallback</span><span class="proto">bc-waveform</span></li>
+    <li><span class="hw">Bandcamp client, crawler and downloader</span><span class="proto">bc-bandcamp · bc-jobs</span></li>
+  </ul>
+  <p class="note">bc is an independent project and is not affiliated with or endorsed by Bandcamp. Support the artists you dig: buy the music you keep.</p>
+</section>
+
+<section class="install" id="install">
+  <div class="wrap section">
+    <svg class="mark mark-lg" viewBox="0 0 100 100" fill="none" aria-hidden="true"><circle cx="50" cy="50" r="36" stroke="#F4F3EF" stroke-width="6"/><circle cx="50" cy="50" r="15" fill="#01FF95"/></svg>
+    <h2>Get bc.</h2>
+    <p class="lead">Builds from source and installs into <code>~/.local</code> — no root needed.</p>
+    <div class="code" role="group" aria-label="Install commands">
+      <pre><code><span class="prompt">$</span> git clone https://github.com/birkmann/bc-01.git bc
+<span class="prompt">$</span> cd bc &amp;&amp; ./scripts/install.sh
+<span class="prompt">$</span> bc-desktop</code></pre>
+      <button class="copy-btn" type="button" data-copy="git clone https://github.com/birkmann/bc-01.git bc &amp;&amp; cd bc &amp;&amp; ./scripts/install.sh">Copy</button>
+    </div>
+    <div class="install-more">
+      <div>
+        <h3>Arch Linux</h3>
+        <p><code>cd packaging &amp;&amp; makepkg -si</code> — installs <code>bc-desktop</code>, the <code>bc-rust</code> command line tool and the icons system-wide.</p>
+      </div>
+      <div>
+        <h3>Requirements</h3>
+        <p>Rust (stable) with the <code>wasm32-unknown-unknown</code> target, <code>trunk</code>, <code>wasm-bindgen</code>, <code>brotli</code>, ALSA, OpenSSL and D-Bus, plus Chromium, Chrome or Brave for the app window.</p>
+      </div>
+      <div>
+        <h3>Phone &amp; browser</h3>
+        <p><code>bc-rust serve</code> serves the same UI on <code>127.0.0.1:8420</code>. Add <code>--lan</code> to reach it from other devices, each paired once.</p>
+      </div>
+    </div>
+    <div class="actions">
+      <a class="pill pill-signal" href="https://github.com/birkmann/bc-01">Source code</a>
+      <a class="pill pill-outline-light" href="https://github.com/birkmann/bc-01#readme">Read the manual</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap footer">
+  <span>bc · MIT · 2026</span>
+  <span><a href="https://github.com/birkmann/bc-01">source</a> · <a href="https://github.com/birkmann/bc-01#readme">docs</a> · <a href="https://github.com/birkmann/bc-01/issues">issues</a></span>
+</footer>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" hidden>
+  <div class="lb-backdrop" data-close></div>
+  <div class="lb-frame">
+    <img class="lb-img" alt="" draggable="false">
+  </div>
+  <p class="lb-caption" aria-live="polite"></p>
+  <div class="lb-bar">
+    <span class="lb-count"></span>
+    <span class="lb-hint">click to zoom · esc to close</span>
+  </div>
+  <button class="lb-btn lb-close" type="button" aria-label="Close" data-close>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+  <button class="lb-btn lb-prev" type="button" aria-label="Previous screenshot">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+  </button>
+  <button class="lb-btn lb-next" type="button" aria-label="Next screenshot">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+  </button>
+</div>
+
+<script>
+// Dark mode toggle. Follows the system setting until the visitor picks one.
+(function () {
+  var root = document.documentElement;
+  var btn = document.querySelector('.theme-toggle');
+  var metas = document.querySelectorAll('meta[name="theme-color"]');
+  var system = window.matchMedia('(prefers-color-scheme: dark)');
+  function isDark() { return root.dataset.theme ? root.dataset.theme === 'dark' : system.matches; }
+  function sync() {
+    var dark = isDark();
+    root.classList.toggle('is-dark', dark);
+    btn.setAttribute('aria-pressed', String(dark));
+    if (root.dataset.theme) metas.forEach(function (m) { m.content = dark ? '#0C0C0C' : '#F4F3EF'; });
+  }
+  btn.addEventListener('click', function () {
+    root.dataset.theme = isDark() ? 'light' : 'dark';
+    try { localStorage.setItem('theme', root.dataset.theme); } catch (e) {}
+    sync();
+  });
+  system.addEventListener('change', sync);
+  sync();
+})();
+
+// Copy the install command.
+document.querySelectorAll('.copy-btn').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var done = function (text) { b.textContent = text; setTimeout(function () { b.textContent = 'Copy'; }, 1600); };
+    var select = function () {
+      var r = document.createRange();
+      r.selectNodeContents(b.parentNode.querySelector('pre'));
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      done('Selected');
+    };
+    if (!navigator.clipboard) return select();
+    navigator.clipboard.writeText(b.dataset.copy).then(function () { done('Copied'); }, select);
+  });
+});
+
+// Screenshot lightbox: the shot grows out of its place on the page (FLIP),
+// a click zooms in further and the view follows the pointer.
+(function () {
+  var lb = document.getElementById('lightbox');
+  var frame = lb.querySelector('.lb-frame');
+  var img = lb.querySelector('.lb-img');
+  var caption = lb.querySelector('.lb-caption');
+  var count = lb.querySelector('.lb-count');
+  var prevBtn = lb.querySelector('.lb-prev');
+  var nextBtn = lb.querySelector('.lb-next');
+  var closeBtn = lb.querySelector('.lb-close');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var EASE = 'cubic-bezier(.2,.8,.2,1)';
+  var shots = [].slice.call(document.querySelectorAll('.shot img'));
+  var current = -1, zoomed = false, opener = null, closing = false;
+
+  // Each screenshot becomes a button that opens it.
+  shots.forEach(function (thumb, i) {
+    var pic = thumb.closest('picture') || thumb;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'shot-open';
+    btn.setAttribute('aria-label', 'View full size: ' + thumb.alt);
+    pic.parentNode.insertBefore(btn, pic);
+    btn.appendChild(pic);
+    var badge = document.createElement('span');
+    badge.className = 'shot-badge';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>View full size';
+    btn.appendChild(badge);
+    btn.addEventListener('click', function () { open(i, btn); });
+  });
+
+  function fitted(thumb) {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var padX = vw < 720 ? 12 : 88, padTop = vw < 720 ? 64 : 72, padBottom = vw < 720 ? 96 : 104;
+    var ratio = thumb.naturalWidth / thumb.naturalHeight || 1.6;
+    var w = Math.min(vw - padX * 2, (vh - padTop - padBottom) * ratio);
+    var h = w / ratio;
+    return { left: (vw - w) / 2, top: padTop + (vh - padTop - padBottom - h) / 2, width: w, height: h };
+  }
+  function place(r) {
+    frame.style.left = r.left + 'px'; frame.style.top = r.top + 'px';
+    frame.style.width = r.width + 'px'; frame.style.height = r.height + 'px';
+  }
+  // Transform that makes the frame (at `to`) cover the rectangle `from`.
+  function cover(from, to) {
+    return 'translate(' + (from.left - to.left) + 'px,' + (from.top - to.top) + 'px) scale(' + (from.width / to.width) + ',' + (from.height / to.height) + ')';
+  }
+  function show(i) {
+    var thumb = shots[i];
+    current = i;
+    img.src = thumb.currentSrc || thumb.src;
+    img.alt = thumb.alt;
+    caption.textContent = thumb.alt;
+    count.textContent = (i + 1) + ' / ' + shots.length;
+    lb.classList.toggle('lb-single', shots.length < 2);
+  }
+  function setZoom(on, e) {
+    zoomed = on;
+    lb.classList.toggle('is-zoomed', on);
+    if (on) pan(e); else img.style.transform = '';
+  }
+  function pan(e) {
+    if (!zoomed) return;
+    var r = frame.getBoundingClientRect();
+    var x = e ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0.5;
+    var y = e ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 0.5;
+    var s = Math.min(3, Math.max(1.8, 2200 / r.width));
+    img.style.transformOrigin = (x * 100) + '% ' + (y * 100) + '%';
+    img.style.transform = 'scale(' + s + ')';
+  }
+
+  function open(i, from) {
+    if (closing) return;
+    opener = from;
+    show(i);
+    var thumb = shots[i];
+    var start = thumb.getBoundingClientRect();
+    var end = fitted(thumb);
+    lb.hidden = false;
+    document.documentElement.classList.add('lb-lock');
+    place(end);
+    if (!reduce.matches) {
+      frame.style.transition = 'none';
+      frame.style.transform = cover(start, end);
+      frame.getBoundingClientRect();
+      frame.style.transition = 'transform .5s ' + EASE;
+    }
+    thumb.style.visibility = 'hidden';
+    requestAnimationFrame(function () {
+      lb.classList.add('is-open');
+      frame.style.transform = '';
+    });
+    closeBtn.focus({ preventScroll: true });
+  }
+
+  function close() {
+    if (lb.hidden || closing) return;
+    closing = true;
+    setZoom(false);
+    var thumb = shots[current];
+    lb.classList.remove('is-open');
+    var finish = function () {
+      frame.removeEventListener('transitionend', finish);
+      clearTimeout(timer);
+      lb.hidden = true;
+      thumb.style.visibility = '';
+      frame.style.transition = 'none';
+      frame.style.transform = '';
+      document.documentElement.classList.remove('lb-lock');
+      closing = false;
+      if (opener) opener.focus({ preventScroll: true });
+    };
+    var timer = setTimeout(finish, 600);
+    if (reduce.matches) { setTimeout(finish, 200); return; }
+    // Fly back to wherever the thumbnail is now.
+    frame.style.transition = 'transform .42s ' + EASE;
+    frame.style.transform = cover(thumb.getBoundingClientRect(), frame.getBoundingClientRect());
+    frame.addEventListener('transitionend', finish);
+  }
+
+  function step(d) {
+    if (lb.hidden || closing) return;
+    setZoom(false);
+    shots[current].style.visibility = '';
+    var i = (current + d + shots.length) % shots.length;
+    opener = shots[i].closest('.shot-open');
+    frame.classList.add('is-switching');
+    setTimeout(function () {
+      show(i);
+      shots[i].style.visibility = 'hidden';
+      frame.style.transition = 'none';
+      place(fitted(shots[i]));
+      requestAnimationFrame(function () { frame.classList.remove('is-switching'); });
+    }, reduce.matches ? 0 : 160);
+  }
+
+  lb.addEventListener('click', function (e) {
+    if (e.target.closest('[data-close]')) close();
+  });
+  prevBtn.addEventListener('click', function () { step(-1); });
+  nextBtn.addEventListener('click', function () { step(1); });
+  frame.addEventListener('click', function (e) { setZoom(!zoomed, e); });
+  frame.addEventListener('pointermove', pan);
+  document.addEventListener('keydown', function (e) {
+    if (lb.hidden) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'ArrowRight') step(1);
+    else if (e.key === 'Tab') {
+      // Keep focus inside the lightbox.
+      var f = [closeBtn, prevBtn, nextBtn].filter(function (b) { return b.offsetParent !== null; });
+      var at = f.indexOf(document.activeElement);
+      e.preventDefault();
+      f[(at + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+    }
+  });
+  window.addEventListener('resize', function () {
+    if (!lb.hidden && !closing) { frame.style.transition = 'none'; place(fitted(shots[current])); }
+  });
+})();
+</script>
+</body>
+</html>
