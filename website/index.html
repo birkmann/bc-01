@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bc · music library &amp; player for linux and macos</title>
-<meta name="description" content="bc is a free and open source music library and player for Linux and macOS, written in Rust, with Bandcamp search and downloads built in.">
+<meta name="description" content="bc is a free music player for Mac and Linux. Play and organise the music you own, discover new releases on Bandcamp and download what you buy.">
 <meta name="theme-color" content="#F4F3EF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C0C0C" media="(prefers-color-scheme: dark)">
 <script>
@@ -21,7 +21,7 @@ try {
 <link rel="stylesheet" href="style.css">
 <meta property="og:type" content="website">
 <meta property="og:title" content="bc · music library &amp; player for linux and macos">
-<meta property="og:description" content="Music library and player for Linux and macOS with Bandcamp search and downloads. Written in Rust, free and open source.">
+<meta property="og:description" content="A free music player for Mac and Linux. Play and organise the music you own, discover new releases on Bandcamp and download what you buy.">
 <meta property="og:image" content="assets/img/og.png?v=3">
 <meta name="twitter:card" content="summary_large_image">
 </head>
@@ -53,12 +53,14 @@ try {
 <main id="main">
 
 <section class="wrap hero" id="top">
-  <span class="label">linux &amp; macos · v0.1.0 · free &amp; open source</span>
+  <span class="label">mac &amp; linux · free · v0.1.0</span>
   <h1>Music library<br>and player</h1>
-  <p class="lead">bc manages and plays your local music collection. Bandcamp search and downloads are built in. Written in Rust.</p>
-  <div class="actions">
-    <a class="pill pill-signal" href="#install">Download</a>
-    <a class="pill pill-outline" href="https://github.com/birkmann/bc-01">View source</a>
+  <div class="hero-copy">
+    <p class="lead">Play and organise the music you own. Discover new releases on Bandcamp and download what you buy straight into your collection.</p>
+    <div class="actions">
+      <a class="pill pill-signal" href="#install">Download</a>
+      <a class="pill pill-outline" href="https://github.com/birkmann/bc-01">View source</a>
+    </div>
   </div>
 </section>
 
@@ -71,32 +73,32 @@ try {
 
 <section class="wrap specs" aria-label="Specifications">
   <dl>
-    <div><dt>Platform</dt><dd>Linux, macOS</dd></div>
-    <div><dt>Language</dt><dd>Rust</dd></div>
-    <div><dt>Database</dt><dd>SQLite with full-text search</dd></div>
-    <div><dt>License</dt><dd>MIT</dd></div>
+    <div><dt>Works on</dt><dd>Mac, Linux</dd></div>
+    <div><dt>Price</dt><dd>Free, no subscription</dd></div>
+    <div><dt>Your music</dt><dd>Stays on your computer</dd></div>
+    <div><dt>Code</dt><dd>Open source</dd></div>
   </dl>
 </section>
 
 <section class="wrap section" id="features">
   <h2>Features</h2>
   <div class="grid features">
-    <article><span class="idx">01</span><h3>Library</h3><p>Scans your music folders into SQLite. Albums, artists, labels, tags, loved tracks, favourites, play history and Top 10. Full-text search, no row limit.</p></article>
-    <article><span class="idx">02</span><h3>Metadata</h3><p>Edit tags with a dry run and undo. Clean up junk files and strays, check releases for missing tracks, move library folders.</p></article>
-    <article><span class="idx">03</span><h3>Player</h3><p>Gapless playback, queue, history, shuffle and auto-fill. EQ, filter and limiter. Media keys on Linux (MPRIS) and macOS.</p></article>
-    <article><span class="idx">04</span><h3>Analysis</h3><p>Tempo, key, energy, EBU R128 loudness and a three-band waveform for every track.</p></article>
-    <article><span class="idx">05</span><h3>Recommendations</h3><p>Next up, similar tracks and taste, computed locally from your library and listening history.</p></article>
-    <article><span class="idx">06</span><h3>Bandcamp</h3><p>Search Bandcamp, browse tag pages, preview releases, follow artists and labels, and browse other fans' collections.</p></article>
-    <article><span class="idx">07</span><h3>Downloads</h3><p>A download queue that resumes after a crash. Files are tagged on download and added to the library.</p></article>
-    <article><span class="idx">08</span><h3>DJ sets</h3><p>Optional: order tracks by key and tempo with automix, edit transitions on a timeline, render to WAV or MP3.</p></article>
+    <article><span class="idx">01</span><h3>Library</h3><p>All your albums, artists and labels in one place. Search everything instantly, heart the tracks you love and see what you play most.</p></article>
+    <article><span class="idx">02</span><h3>Tidy up</h3><p>Fix wrong song titles and artist names, with undo. Find leftover junk files and albums with missing tracks.</p></article>
+    <article><span class="idx">03</span><h3>Player</h3><p>Albums play without gaps between tracks. Queue, shuffle and an equaliser. The play and skip keys on your keyboard just work.</p></article>
+    <article><span class="idx">04</span><h3>Analysis</h3><p>bc works out the tempo, musical key and energy of every track, and draws a picture of each song so you can see its shape.</p></article>
+    <article><span class="idx">05</span><h3>Recommendations</h3><p>Suggestions for what to play next and tracks that sound alike, based on what you listen to and worked out on your own computer.</p></article>
+    <article><span class="idx">06</span><h3>Bandcamp</h3><p>Search Bandcamp, browse by genre, listen to previews and follow your favourite artists and labels. See what other fans collect.</p></article>
+    <article><span class="idx">07</span><h3>Downloads</h3><p>Download your Bandcamp purchases. They arrive with the right song and artist names and land in your library by themselves. Interrupted downloads pick up where they stopped.</p></article>
+    <article><span class="idx">08</span><h3>DJ sets</h3><p>For DJs: bc can put tracks in an order that flows, let you fine-tune each transition and save the whole mix as one audio file.</p></article>
   </div>
 </section>
 
 <section class="wrap section split" id="library">
   <div class="copy">
     <h2>Library</h2>
-    <p>Sorting, filtering and search run on the server, so the track list shows the whole collection instead of the first 500 rows. Columns include BPM, key, length, date added, play count and a waveform.</p>
-    <p>Waveforms use an absolute <span class="kbd">dB</span> scale, so quiet masters look quiet. They are drawn on the GPU.</p>
+    <p>Your whole collection in one list, however big it gets. Sort and filter by artist, tempo, key, length, when you added it or how often you've played it.</p>
+    <p>Every track shows its waveform, a picture of how loud it is from start to finish, so a quiet intro or a big drop is easy to spot.</p>
   </div>
   <figure class="shot shot-detail">
     <picture>
@@ -108,7 +110,7 @@ try {
 
 <section class="wrap section" id="player">
   <h2>Player</h2>
-  <p class="lead narrow">A native audio engine with gapless playback, EQ, filter, echo, limiter and key lock. Queue, history, shuffle and auto-fill. Media keys work through MPRIS on Linux and Now Playing on macOS. The same audio code runs in the browser, so a phone on the local network can open bc and play through its own speaker.</p>
+  <p class="lead narrow">Albums play the way they were meant to, without gaps between tracks. Shape the sound with the equaliser and effects, line up what comes next, or let bc keep the music going when the queue runs out. The play, pause and skip keys on your keyboard work as you'd expect. With a one-time setup you can also open bc on your phone over your home Wi-Fi and play music through the phone itself.</p>
 </section>
 
 <section class="dark" id="bandcamp">
@@ -121,27 +123,25 @@ try {
     </figure>
     <div class="copy">
       <h2>Bandcamp</h2>
-      <p>Explore: search Bandcamp and browse tag pages. Feed: new releases from followed artists and labels. Fans: browse other fans' collections. Liked releases go to the download queue.</p>
-      <p>Requests are rate-limited and cached. Responses are validated, including errors Bandcamp returns with a 200 status.</p>
+      <p>Find new music by genre and place, keep up with new releases from the artists and labels you follow, and see what other fans are buying.</p>
+      <p>When you find something you like, one click adds it to your downloads. Releases you've bought are fetched in the format you choose.</p>
       <ul class="tags">
-        <li>Explore</li><li>Feed</li><li>Fans</li><li>Harvest</li><li>Wishlists</li><li>Tracklists</li>
+        <li>Explore</li><li>New releases</li><li>Other fans</li><li>Wishlists</li><li>Downloads</li>
       </ul>
     </div>
   </div>
 </section>
 
 <section class="wrap section" id="stack">
-  <h2>Built with Rust</h2>
-  <p class="lead narrow">A workspace of 23 crates, including the interface. The desktop app runs the server and shows the UI in a native window on macOS, or in a Chromium or Firefox app window on Linux. Other devices on the local network can open the same UI after pairing.</p>
+  <h2>Yours, not ours</h2>
+  <p class="lead narrow">bc runs on your own computer. Your music, your playlists and what you listen to stay there. No account to create, no ads and nothing to pay.</p>
   <ul class="grid hardware">
-    <li><span class="hw">Leptos interface, compiled to WebAssembly</span><span class="proto">bc-ui</span></li>
-    <li><span class="hw">axum server with a typed WebSocket hub</span><span class="proto">bc-server</span></li>
-    <li><span class="hw">SQLite in WAL mode, FTS5 search, one writer</span><span class="proto">bc-db</span></li>
-    <li><span class="hw">Real-time audio engine on cpal, media keys</span><span class="proto">bc-engine</span></li>
-    <li><span class="hw">EQ, filters, echo, key lock</span><span class="proto">bc-dsp · native + wasm</span></li>
-    <li><span class="hw">Tempo, key, loudness, waveforms</span><span class="proto">bc-analysis</span></li>
-    <li><span class="hw">GPU waveforms, WebGL2 with Canvas2D fallback</span><span class="proto">bc-waveform</span></li>
-    <li><span class="hw">Bandcamp client, crawler and downloader</span><span class="proto">bc-bandcamp · bc-jobs</span></li>
+    <li><span class="hw">Your music stays on your computer</span><span class="proto">private</span></li>
+    <li><span class="hw">No account, no ads, no subscription</span><span class="proto">free</span></li>
+    <li><span class="hw">Plays your collection without internet</span><span class="proto">offline</span></li>
+    <li><span class="hw">Your Bandcamp login is only ever sent to Bandcamp</span><span class="proto">safe</span></li>
+    <li><span class="hw">Quick, even with a huge collection</span><span class="proto">fast</span></li>
+    <li><span class="hw">Anyone can read and check the code</span><span class="proto">open source</span></li>
   </ul>
   <p class="note">bc is an independent project and is not affiliated with or endorsed by Bandcamp.</p>
 </section>
@@ -150,17 +150,17 @@ try {
   <div class="wrap section">
     <svg class="mark mark-lg" viewBox="0 0 100 100" fill="none" aria-hidden="true"><circle cx="50" cy="50" r="36" stroke="#F4F3EF" stroke-width="6"/><circle cx="50" cy="50" r="15" fill="#01FF95"/></svg>
     <h2>Install</h2>
-    <p class="lead">bc runs on macOS and Linux.</p>
+    <p class="lead">bc runs on Mac and Linux.</p>
     <div class="platforms">
       <div class="platform" id="macos">
-        <h3>macOS</h3>
-        <p>For Macs with Apple silicon, macOS 12 or later. Open the disk image and drag bc to Applications.</p>
-        <a class="pill pill-signal" href="https://github.com/birkmann/bc-01/releases/latest/download/bc-macos-arm64.dmg">Download for macOS</a>
-        <p class="note">bc is not notarized by Apple yet, so macOS blocks the first launch. Open System Settings → Privacy &amp; Security and choose <b>Open Anyway</b>.</p>
+        <h3>Mac</h3>
+        <p>For Macs with an Apple chip (M1 or newer) on macOS 12 or later. Open the downloaded file and drag bc into your Applications folder.</p>
+        <a class="pill pill-signal" href="https://github.com/birkmann/bc-01/releases/latest/download/bc-macos-arm64.dmg">Download for Mac</a>
+        <p class="note">The first time you open bc, your Mac will say it can't check the app, because bc isn't registered with Apple yet. Go to System Settings → Privacy &amp; Security, scroll down and click <b>Open Anyway</b>. You only need to do this once.</p>
       </div>
       <div class="platform" id="linux">
         <h3>Linux</h3>
-        <p>Build from source and install into <code>~/.local</code>. No root needed.</p>
+        <p>There's no ready-made download for Linux yet. If you're comfortable with the terminal, these commands build and install bc for your user:</p>
         <div class="code" role="group" aria-label="Install commands">
           <pre><code><span class="prompt">$</span> git clone https://github.com/birkmann/bc-01.git bc
 <span class="prompt">$</span> cd bc &amp;&amp; ./scripts/install.sh
@@ -171,16 +171,16 @@ try {
     </div>
     <div class="install-more">
       <div>
+        <h3>On your phone</h3>
+        <p>Open bc in your phone's browser over your home Wi-Fi. It takes a one-time setup on your computer, and each phone is paired with a short code. The manual has the details.</p>
+      </div>
+      <div>
         <h3>Arch Linux</h3>
-        <p><code>cd packaging &amp;&amp; makepkg -si</code> installs <code>bc-desktop</code>, the <code>bc-rust</code> command line tool and the icons system-wide.</p>
+        <p>Arch users can install the included package with <code>cd packaging &amp;&amp; makepkg -si</code>.</p>
       </div>
       <div>
-        <h3>Build from source</h3>
-        <p>Rust (stable) with the <code>wasm32-unknown-unknown</code> target, <code>trunk</code> and <code>brotli</code>; on Linux also ALSA, OpenSSL and D-Bus, plus Chromium, Chrome, Brave or Firefox for the app window. On macOS, <code>./packaging/macos/build-app.sh</code> builds the app.</p>
-      </div>
-      <div>
-        <h3>Phone &amp; browser</h3>
-        <p><code>bc-rust serve</code> serves the same UI on <code>127.0.0.1:8420</code>. Add <code>--lan</code> to reach it from other devices, each paired once.</p>
+        <h3>Developers</h3>
+        <p>bc is written in Rust. Build instructions and technical details are in the manual on GitHub.</p>
       </div>
     </div>
     <div class="actions">

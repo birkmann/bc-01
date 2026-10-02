@@ -150,8 +150,12 @@ p { margin: 0; }
 
 /* --- Hero ------------------------------------------------------------ */
 .label { font-family: var(--mono); font-size: 14px; color: var(--muted); }
-.hero { padding-top: 96px; padding-bottom: 56px; display: flex; flex-direction: column; gap: 28px; }
-.hero h1 { font-size: clamp(52px, 9vw, 128px); letter-spacing: -0.05em; line-height: 0.95; }
+/* Heading left, copy and actions right on its baseline: the hero stays short enough that the
+   app screenshot starts above the fold. Stacks below 1000px. */
+.hero { padding-top: 72px; padding-bottom: 48px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); column-gap: 64px; row-gap: 24px; align-items: end; }
+.hero .label { grid-column: 1 / -1; }
+.hero h1 { font-size: clamp(52px, 8vw, 112px); letter-spacing: -0.05em; line-height: 0.95; }
+.hero-copy { display: flex; flex-direction: column; gap: 28px; }
 .lead { max-width: 560px; font-size: 20px; line-height: 1.5; color: var(--text); }
 .lead.narrow { max-width: 640px; }
 
@@ -305,6 +309,7 @@ p { margin: 0; }
   .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .specs dl { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; }
   .split, .split-reverse, .platforms { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .hero { grid-template-columns: minmax(0, 1fr); row-gap: 28px; }
   .split-reverse .shot { order: 2; }
 }
 @media (max-width: 720px) {
