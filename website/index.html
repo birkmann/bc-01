@@ -226,6 +226,16 @@ try {
 <footer class="wrap footer">
   <span>bc · MIT · 2026</span>
   <span><a href="https://github.com/birkmann/bc-01">source</a> · <a href="https://github.com/birkmann/bc-01#readme">docs</a> · <a href="https://github.com/birkmann/bc-01/issues">issues</a></span>
+  <details class="terminal">
+    <summary>install from the terminal (linux)</summary>
+    <p>Clones the source, builds bc, installs it into <code>~/.local</code> for your user and starts it. No root access needed. Building needs Rust with the <code>wasm32-unknown-unknown</code> target, <code>trunk</code>, <code>wasm-bindgen</code>, <code>clang</code> and a few development files; see the <a href="https://github.com/birkmann/bc-01#readme">manual</a>.</p>
+    <div class="code" role="group" aria-label="Terminal commands">
+      <pre><code><span class="prompt">$</span> git clone https://github.com/birkmann/bc-01.git bc
+<span class="prompt">$</span> cd bc &amp;&amp; ./scripts/install.sh
+<span class="prompt">$</span> bc-desktop</code></pre>
+      <button class="copy-btn" type="button" data-copy="git clone https://github.com/birkmann/bc-01.git bc &amp;&amp; cd bc &amp;&amp; ./scripts/install.sh &amp;&amp; bc-desktop">Copy</button>
+    </div>
+  </details>
 </footer>
 
 <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot" hidden>
@@ -272,7 +282,7 @@ try {
   sync();
 })();
 
-// Copy the install command.
+// Copy the terminal install command.
 document.querySelectorAll('.copy-btn').forEach(function (b) {
   b.addEventListener('click', function () {
     var done = function (text) { b.textContent = text; setTimeout(function () { b.textContent = 'Copy'; }, 1600); };
