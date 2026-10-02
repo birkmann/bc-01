@@ -58,9 +58,43 @@ try {
   <div class="hero-copy">
     <p class="lead">Play and organise the music you own. Discover new releases on Bandcamp and download what you buy straight into your collection.</p>
     <div class="actions">
-      <a class="pill pill-signal" href="#install">Download</a>
+      <a class="pill pill-signal pill-dl" id="hero-download" href="#install">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        <span>Download</span>
+      </a>
       <a class="pill pill-outline" href="https://github.com/birkmann/bc-01">View source</a>
     </div>
+    <p class="dl-meta" id="hero-download-meta">For Mac and Linux · <a href="#install">all downloads</a></p>
+    <script>
+    // Offer the build for the visitor's system; one click downloads it. Anything else (Windows,
+    // phones, ChromeOS, ARM Linux) keeps the plain button to the install section.
+    (function () {
+      var base = 'https://github.com/birkmann/bc-01/releases/latest/download/';
+      var builds = {
+        mac: { file: 'bc-macos-arm64.dmg', name: 'Mac', meta: 'Apple chip · macOS 12 or later', help: '#macos' },
+        linux: { file: 'bc-linux-x86_64.AppImage', name: 'Linux', meta: '64-bit PC · AppImage', help: '#linux' }
+      };
+      var ua = navigator.userAgent;
+      var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+      var os = null;
+      if (/android|cros|chrome os/i.test(ua + ' ' + platform)) os = null;
+      // iPads report a Mac platform too, but have a touch screen.
+      else if (/mac/i.test(platform) && !(navigator.maxTouchPoints > 1)) os = 'mac';
+      // The AppImage is x86_64 only; userAgentData says just "Linux", navigator.platform the CPU.
+      else if (/linux/i.test(platform) && !/arm|aarch64/i.test(navigator.platform || '')) os = 'linux';
+      if (!os) return;
+      var b = builds[os];
+      var btn = document.getElementById('hero-download');
+      var meta = document.getElementById('hero-download-meta');
+      btn.href = base + b.file;
+      btn.setAttribute('download', '');
+      btn.querySelector('span').textContent = 'Download for ' + b.name;
+      meta.innerHTML = b.meta + ' · <a href="#install">other systems</a>';
+      btn.addEventListener('click', function () {
+        meta.innerHTML = 'Downloading… <a href="' + b.help + '">how to open it</a>';
+      });
+    })();
+    </script>
   </div>
 </section>
 

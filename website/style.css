@@ -156,6 +156,11 @@ p { margin: 0; }
 .hero .label { grid-column: 1 / -1; }
 .hero h1 { font-size: clamp(52px, 8vw, 112px); letter-spacing: -0.05em; line-height: 0.95; }
 .hero-copy { display: flex; flex-direction: column; gap: 28px; }
+.pill-dl { gap: 10px; }
+.pill-dl svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dl-meta { margin: -16px 0 0; font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.dl-meta a { color: inherit; }
+.dl-meta a:hover { color: var(--fg); }
 .lead { max-width: 560px; font-size: 20px; line-height: 1.5; color: var(--text); }
 .lead.narrow { max-width: 640px; }
 
