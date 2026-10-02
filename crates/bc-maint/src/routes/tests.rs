@@ -185,6 +185,24 @@ async fn bulk_delete_gives_back_the_tag_counts() {
 }
 
 #[tokio::test]
+async fn bulk_delete_announces_the_releases() {
+    // Album grids listen for `release` invalidations; announcing only the tracks left deleted
+    // albums on screen until a reload.
+    let env = test_env();
+    let (music, root) = music_root(&env);
+    let a = album_on_disk(&env, root, &music, "Producer", "Gone", 1, &[], None);
+    let mut rx = env.ctx.bus.subscribe();
+    call(&app(&env, false), "POST", "/releases/delete", Some(json!({"ids": [a.release]}))).await;
+    let mut entities = vec![];
+    while let Ok(ev) = rx.try_recv() {
+        if ev.topic == bc_types::events::TOPIC_INVALIDATE {
+            entities.push((ev.payload["entity"].as_str().unwrap_or_default().to_string(), ev.payload["ids"].clone()));
+        }
+    }
+    assert!(entities.contains(&("release".into(), json!([a.release]))), "{entities:?}");
+}
+
+#[tokio::test]
 async fn one_bad_release_does_not_abort_the_batch() {
     use std::os::unix::fs::PermissionsExt;
     // A permission-denied file two albums into a sweep must not roll back the ones that worked.

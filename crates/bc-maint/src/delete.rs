@@ -110,7 +110,12 @@ pub fn purge_release(ctx: &Ctx, release_id: i64) -> ApiResult<Purged> {
     Ok(Purged { track_ids, files })
 }
 
-fn announce(ctx: &Ctx, deleted: &[i64]) {
+/// Tell open views what went: `deleted` tracks and the `releases` removed with them (album grids
+/// listen for `release`, track lists for `track`).
+fn announce(ctx: &Ctx, deleted: &[i64], releases: &[i64]) {
+    if !releases.is_empty() {
+        ctx.bus.invalidate("release", releases.to_vec());
+    }
     if deleted.is_empty() {
         return;
     }
@@ -137,7 +142,7 @@ pub fn delete_releases(ctx: &Ctx, ids: &[i64], blacklist_them: bool, reason: Opt
     }
     let mut result = DeleteReleasesResult::default();
     let mut entries = Vec::new();
-    let mut deleted = Vec::new();
+    let (mut deleted, mut gone) = (Vec::new(), Vec::new());
     for (id, title, url, artist) in releases {
         let label = if title.is_empty() { id.to_string() } else { title.clone() };
         if blacklist_them {
@@ -156,6 +161,7 @@ pub fn delete_releases(ctx: &Ctx, ids: &[i64], blacklist_them: bool, reason: Opt
                 result.tracks += p.track_ids.len() as i64;
                 result.files += p.files;
                 deleted.extend(p.track_ids);
+                gone.push(id);
             }
             Err(e) => {
                 tracing::error!(release = %label, error = %e, "bulk delete failed for release");
@@ -168,7 +174,7 @@ pub fn delete_releases(ctx: &Ctx, ids: &[i64], blacklist_them: bool, reason: Opt
         let es = entries;
         result.inbox_ignored = ctx.write(move |t| blacklist::ignore_matching_inbox(t, &es))? as i64;
     }
-    announce(ctx, &deleted);
+    announce(ctx, &deleted, &gone);
     Ok(result)
 }
 
@@ -197,20 +203,21 @@ pub fn delete_track(ctx: &Ctx, track_id: i64) -> ApiResult<DeletedOut> {
         Ok(Some((rid, folder)))
     })?;
     let mut touched = parents;
+    let gone: Vec<i64> = emptied.as_ref().map(|(rid, _)| *rid).into_iter().collect();
     if let Some((rid, folder)) = emptied {
         touched.extend(folder.map(PathBuf::from));
         ctx.read(|c| tidy::sweep_sidecars(c, &touched))?;
         tidy::delete_artwork(&ctx.config.art_dir(), &[rid]);
     }
     ctx.read(|c| tidy::prune_empty_dirs(c, &touched))?;
-    announce(ctx, &[track_id]);
+    announce(ctx, &[track_id], &gone);
     Ok(DeletedOut { tracks: 1, files })
 }
 
 /// `DELETE /releases/{id}`: every track, its files and the emptied folders.
 pub fn delete_release(ctx: &Ctx, release_id: i64) -> ApiResult<DeletedOut> {
     let p = purge_release(ctx, release_id)?;
-    announce(ctx, &p.track_ids);
+    announce(ctx, &p.track_ids, &[release_id]);
     Ok(DeletedOut { tracks: p.track_ids.len() as i64, files: p.files })
 }
 
@@ -230,7 +237,7 @@ pub fn delete_label(ctx: &Ctx, label_id: i64) -> ApiResult<DeleteLabelResult> {
         Ok(st.query_map([label_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?)
     })?;
     let mut result = DeleteLabelResult::default();
-    let (mut deleted, mut errors) = (Vec::new(), Vec::new());
+    let (mut deleted, mut gone, mut errors) = (Vec::new(), Vec::new(), Vec::new());
     for (id, title) in releases {
         match purge_release(ctx, id) {
             Ok(p) => {
@@ -238,6 +245,7 @@ pub fn delete_label(ctx: &Ctx, label_id: i64) -> ApiResult<DeleteLabelResult> {
                 result.tracks += p.track_ids.len() as i64;
                 result.files += p.files;
                 deleted.extend(p.track_ids);
+                gone.push(id);
             }
             Err(e) => {
                 tracing::error!(release = %title, label = %name, error = %e, "could not delete release while removing label");
@@ -245,7 +253,7 @@ pub fn delete_label(ctx: &Ctx, label_id: i64) -> ApiResult<DeleteLabelResult> {
             }
         }
     }
-    announce(ctx, &deleted);
+    announce(ctx, &deleted, &gone);
     if !errors.is_empty() {
         let kept = errors.len();
         return Err(ApiError::bad(format!(

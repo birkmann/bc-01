@@ -168,15 +168,15 @@ try {
 </section>
 
 <section class="wrap section" id="stack">
-  <h2>Yours, not ours</h2>
-  <p class="lead narrow">bc runs on your own computer. Your music, your playlists and what you listen to stay there. No account to create, no ads and nothing to pay.</p>
+  <h2>How it works</h2>
+  <p class="lead narrow">bc is one program written in Rust. It runs a small server on your computer and shows its interface in an app window. The only site it talks to is Bandcamp.</p>
   <ul class="grid hardware">
-    <li><span class="hw">Your music stays on your computer</span><span class="proto">private</span></li>
-    <li><span class="hw">No account, no ads, no subscription</span><span class="proto">free</span></li>
-    <li><span class="hw">Plays your collection without internet</span><span class="proto">offline</span></li>
-    <li><span class="hw">Your Bandcamp login is only ever sent to Bandcamp</span><span class="proto">safe</span></li>
-    <li><span class="hw">Quick, even with a huge collection</span><span class="proto">fast</span></li>
-    <li><span class="hw">Anyone can read and check the code</span><span class="proto">open source</span></li>
+    <li><span class="hw">Library, playlists and play history in one database file</span><span class="proto">sqlite</span></li>
+    <li><span class="hw">Server only reachable from your own computer unless you turn on phone access</span><span class="proto">127.0.0.1:8420</span></li>
+    <li><span class="hw">Tempo, key, loudness and waveforms worked out on your computer</span><span class="proto">ebu r128</span></li>
+    <li><span class="hw">Purchases downloaded in the format you pick</span><span class="proto">flac · mp3 · wav</span></li>
+    <li><span class="hw">Keeps the Bandcamp login cookie, never your password</span><span class="proto">0600 / keyring</span></li>
+    <li><span class="hw">Interrupted downloads resume, no half-written files</span><span class="proto">.part → rename</span></li>
   </ul>
   <p class="note">bc is an independent project and is not affiliated with or endorsed by Bandcamp.</p>
 </section>
