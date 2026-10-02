@@ -198,6 +198,16 @@ input[type='range'] { accent-color: var(--color-accent); }
 .dt-th.sortable { cursor: pointer; }
 .dt-th.sortable:hover { color: var(--color-ink); }
 .dt-th[aria-sort] { color: var(--color-accent); }
+.dt-th { position: relative; }
+.dt-th.moving { z-index: 4; background: var(--color-surface-3); color: var(--color-ink); box-shadow: var(--shadow-pop); opacity: .92; }
+.dt-th.drop-before { box-shadow: inset 2px 0 0 var(--color-accent); }
+.dt-th.drop-after { box-shadow: inset -2px 0 0 var(--color-accent); }
+.dt-resize { position: absolute; top: 0; bottom: 0; right: 0; width: 9px; cursor: col-resize; touch-action: none; }
+.dt-resize::after { content: ''; position: absolute; top: 9px; bottom: 9px; right: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background var(--dur-fast); }
+.dt-head:hover .dt-resize::after { background: var(--color-line); }
+.dt-resize:hover::after, .dt-resize:active::after { background: var(--color-accent); }
+html.col-moving .dt-resize::after { background: transparent; }
+html.col-moving, html.col-moving * { cursor: grabbing !important; user-select: none !important; }
 .dt-empty { position: absolute; inset: 32px 0 0 0; display: grid; place-items: center; pointer-events: none; }
 .dt-empty > * { pointer-events: auto; }
 .dt input[type='checkbox'] { accent-color: var(--color-accent); width: 15px; height: 15px; }

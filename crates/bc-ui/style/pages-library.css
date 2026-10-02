@@ -301,7 +301,8 @@
 @media (min-width: 640px) { .hm-stats.band { grid-template-columns: repeat(3, 1fr); } }
 @media (min-width: 1000px) { .hm-stats.band { grid-template-columns: repeat(6, 1fr); } }
 .hm-stats.band .hm-stat { background: var(--color-surface-2); border-radius: var(--radius-lg); padding: 14px 16px; border: 1px solid var(--color-line-subtle); }
-.hm-stat-v { font-size: var(--text-xl); font-weight: 600; line-height: 1.1; }
+.hm-stat-v { font-size: var(--text-lg); font-weight: 600; line-height: 1.1; white-space: nowrap; }
+.hm-stats.rail .hm-stat-v { font-size: var(--text-md); }
 .hm-stat-k { margin-top: 4px; font-size: var(--text-3xs); letter-spacing: .1em; text-transform: uppercase; color: var(--color-ink-faint); }
 .hm-fav-scroll { max-height: 30rem; overflow-y: auto; padding-right: 2px; }
 .hm-fav-grid.rail { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

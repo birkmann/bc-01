@@ -173,22 +173,36 @@ pub fn delete_releases(ctx: &Ctx, ids: &[i64], blacklist_them: bool, reason: Opt
 }
 
 /// `DELETE /tracks/{id}`: the audio file goes as well as the row (removing only the row would be
-/// pointless: the next scan re-imports the file).
+/// pointless: the next scan re-imports the file). Deleting a release's last track takes the
+/// release with it, the way `purge_release` would: an empty album would otherwise linger on Home
+/// and in Albums with every track "missing".
 pub fn delete_track(ctx: &Ctx, track_id: i64) -> ApiResult<DeletedOut> {
-    ctx.read(|c| {
-        c.query_row("SELECT 1 FROM tracks WHERE id = ?1", [track_id], |r| r.get::<_, i64>(0))
+    let release_id: Option<i64> = ctx.read(|c| {
+        c.query_row("SELECT release_id FROM tracks WHERE id = ?1", [track_id], |r| r.get(0))
             .optional()?
-            .map(|_| ())
             .ok_or_else(|| ApiError::not_found(format!("track {track_id} not found")))
     })?;
     let (files, parents) = ctx.read(|c| delete_files(c, &[track_id]))?;
-    ctx.write(move |t| {
+    let emptied = ctx.write(move |t| {
         release_tag_counts(t, &[track_id])?;
         bc_db::fts::remove_tracks(t, &[track_id]).map_err(ApiError::from)?;
         t.execute("DELETE FROM tracks WHERE id = ?1", [track_id])?;
-        Ok(())
+        let Some(rid) = release_id else { return Ok(None) };
+        if t.query_row("SELECT EXISTS(SELECT 1 FROM tracks WHERE release_id = ?1)", [rid], |r| r.get::<_, bool>(0))? {
+            return Ok(None);
+        }
+        let folder: Option<String> = t.query_row("SELECT folder_path FROM releases WHERE id = ?1", [rid], |r| r.get(0)).optional()?.flatten();
+        tidy::delete_artwork_rows(t, &[rid])?;
+        t.execute("DELETE FROM releases WHERE id = ?1", [rid])?;
+        Ok(Some((rid, folder)))
     })?;
-    ctx.read(|c| tidy::prune_empty_dirs(c, &parents))?;
+    let mut touched = parents;
+    if let Some((rid, folder)) = emptied {
+        touched.extend(folder.map(PathBuf::from));
+        ctx.read(|c| tidy::sweep_sidecars(c, &touched))?;
+        tidy::delete_artwork(&ctx.config.art_dir(), &[rid]);
+    }
+    ctx.read(|c| tidy::prune_empty_dirs(c, &touched))?;
     announce(ctx, &[track_id]);
     Ok(DeletedOut { tracks: 1, files })
 }

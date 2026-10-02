@@ -92,7 +92,56 @@ pub fn grid_template(widths: &[(f64, bool)], with_select: bool) -> String {
     for (w, grow) in widths {
         parts.push(if *grow { format!("minmax({w}px, 1fr)") } else { format!("{w}px") });
     }
+    // Every column sized by hand: an empty track takes the rest so rows still span the table.
+    if !widths.iter().any(|(_, grow)| *grow) {
+        parts.push("minmax(0, 1fr)".into());
+    }
     parts.join(" ")
+}
+
+/// Smallest width a column can be dragged to.
+const MIN_COL_W: f64 = 32.0;
+/// Pointer travel before a header press becomes a column move instead of a click.
+const MOVE_THRESHOLD: f64 = 5.0;
+
+/// Pin the implicit defaults into `p` before editing it: the default hidden set (an empty
+/// `hidden` + `order` means "defaults") and a complete `order` (columns added since keep
+/// their place after the known ones).
+fn materialize(p: &mut ColumnPrefs, cols: &[(&'static str, bool)]) {
+    if p.hidden.is_empty() && p.order.is_empty() {
+        p.hidden = cols.iter().filter(|c| c.1).map(|c| c.0.to_string()).collect();
+    }
+    let mut ids: Vec<&str> = cols.iter().map(|c| c.0).collect();
+    ids.sort_by_key(|id| p.order.iter().position(|o| o == id).unwrap_or(usize::MAX));
+    p.order = ids.into_iter().map(String::from).collect();
+}
+
+/// Move column `id` to slot `to` of the `visible` columns (`to == visible.len()`: after the
+/// last), editing the full `order`, which also holds the hidden columns.
+fn move_column(order: &mut Vec<String>, visible: &[&str], id: &str, to: usize) {
+    order.retain(|o| o != id);
+    let at = match visible.get(to) {
+        Some(before) => order.iter().position(|o| o == before),
+        None => visible.iter().rev().find(|v| **v != id).and_then(|last| order.iter().position(|o| o == last)).map(|i| i + 1),
+    };
+    order.insert(at.unwrap_or(order.len()), id.to_string());
+}
+
+/// The slot a column dragged from `from` drops into, or `None` when it would stay put.
+fn drop_slot(from: usize, to: usize) -> Option<usize> {
+    (to != from && to != from + 1).then_some(to)
+}
+
+/// A header press that may turn into a column move.
+#[derive(Clone, Copy, PartialEq)]
+struct HeadDrag {
+    id: &'static str,
+    from: usize,
+    x0: f64,
+    dx: f64,
+    /// Past the threshold: moving, not clicking.
+    active: bool,
+    drop: Option<usize>,
 }
 
 fn viewport_w() -> f64 {
@@ -150,60 +199,78 @@ where
             }
         });
     }
-    let visible_cols = Signal::derive(move || -> Vec<Column<R>> {
+    // Ids of the shown columns, in order. A memo, so a width change (every pointer move of a
+    // resize) re-lays the grid without re-rendering the rows.
+    let visible_ids = Memo::new(move |_| -> Vec<&'static str> {
         let vw = viewport_w();
         let p = prefs.get();
-        let mut cols: Vec<Column<R>> = columns.with_value(|c| c.clone());
+        let mut cols: Vec<(&'static str, bool, f64)> = columns.with_value(|c| c.iter().map(|c| (c.id, c.default_hidden, c.min_viewport)).collect());
         if !p.order.is_empty() {
-            cols.sort_by_key(|c| p.order.iter().position(|o| o == c.id).unwrap_or(usize::MAX));
+            cols.sort_by_key(|c| p.order.iter().position(|o| o == c.0).unwrap_or(usize::MAX));
         }
         cols.into_iter()
-            .filter(|c| {
-                let hidden = if p.hidden.is_empty() && p.order.is_empty() { c.default_hidden } else { p.hidden.iter().any(|h| h == c.id) };
-                !hidden && vw >= c.min_viewport
+            .filter(|&(id, default_hidden, min_viewport)| {
+                let hidden = if p.hidden.is_empty() && p.order.is_empty() { default_hidden } else { p.hidden.iter().any(|h| h == id) };
+                !hidden && vw >= min_viewport
             })
+            .map(|c| c.0)
             .collect()
     });
-    // Column chooser (visibility only; saved per table in ui_state).
-    let save_prefs = {
+    let visible_cols = Signal::derive(move || -> Vec<Column<R>> {
+        visible_ids.with(|ids| columns.with_value(|cols| ids.iter().filter_map(|id| cols.iter().find(|c| c.id == *id).cloned()).collect()))
+    });
+    let col_defaults = move || -> Vec<(&'static str, bool)> { columns.with_value(|c| c.iter().map(|c| (c.id, c.default_hidden)).collect()) };
+    // Column prefs are saved per table in ui_state.
+    let persist = {
         let k = prefs_key.clone();
-        move |p: &ColumnPrefs| {
-            let (k, p) = (k.clone(), p.clone());
+        Callback::new(move |_: ()| {
+            let Some(p) = prefs.try_get_untracked() else { return };
+            let k = k.clone();
             spawn_local(async move {
                 let _ = crate::api::call_json("PUT", &format!("/ui-state/{k}"), &p).await;
             });
-        }
+        })
     };
+    // Column chooser: visibility, plus a reset of the dragged widths and order.
     let chooser = Callback::new(move |_: ()| -> Vec<MenuEntry> {
-        columns.with_value(|cols| {
+        let mut entries: Vec<MenuEntry> = columns.with_value(|cols| {
             cols.iter()
                 .filter(|c| !c.label.is_empty())
                 .map(|c| {
                     let id = c.id;
-                    let default_hidden: Vec<String> = columns.with_value(|all| all.iter().filter(|x| x.default_hidden).map(|x| x.id.to_string()).collect());
-                    let all_ids: Vec<String> = columns.with_value(|all| all.iter().map(|x| x.id.to_string()).collect());
                     let hidden_now = {
                         let p = prefs.get_untracked();
                         if p.hidden.is_empty() && p.order.is_empty() { c.default_hidden } else { p.hidden.iter().any(|h| h == id) }
                     };
-                    let save_prefs = save_prefs.clone();
                     crate::ds::MenuItem::new(c.label).checked(!hidden_now).on(move || {
                         prefs.update(|p| {
-                            if p.hidden.is_empty() && p.order.is_empty() {
-                                p.hidden = default_hidden.clone();
-                                p.order = all_ids.clone();
-                            }
+                            materialize(p, &col_defaults());
                             if let Some(i) = p.hidden.iter().position(|h| h == id) { p.hidden.remove(i); } else { p.hidden.push(id.to_string()); }
                         });
-                        save_prefs(&prefs.get_untracked());
+                        persist.run(());
                     }).into()
                 })
                 .collect()
-        })
+        });
+        let p = prefs.get_untracked();
+        let custom_order = !p.order.is_empty() && p.order.iter().map(String::as_str).ne(col_defaults().iter().map(|c| c.0));
+        if !p.widths.is_empty() || custom_order {
+            entries.push(MenuEntry::Sep);
+            entries.push(crate::ds::MenuItem::new("Reset widths and order").icon("refresh").on(move || {
+                prefs.update(|p| {
+                    materialize(p, &col_defaults());
+                    p.order = col_defaults().iter().map(|c| c.0.to_string()).collect();
+                    p.widths.clear();
+                });
+                persist.run(());
+            }).into());
+        }
+        entries
     });
     let template = Memo::new(move |_| {
         let p = prefs.get();
-        let w: Vec<(f64, bool)> = visible_cols.get().iter().map(|c| (p.widths.get(c.id).copied().unwrap_or(c.width), c.grow)).collect();
+        // A column the user sized keeps that width; the others keep growing into the free space.
+        let w: Vec<(f64, bool)> = visible_cols.get().iter().map(|c| match p.widths.get(c.id) { Some(w) => (*w, false), None => (c.width, c.grow) }).collect();
         grid_template(&w, selection.is_some())
     });
     let min_w = Memo::new(move |_| {
@@ -406,6 +473,67 @@ where
         });
     };
 
+    // ---- header drags: resize (right edge) and move (the cell) ---------------------
+    let head_ref = NodeRef::<leptos::html::Div>::new();
+    // column id, pointer x and column width at grab
+    let resizing = StoredValue::new(None::<(&'static str, f64, f64)>);
+    let head_drag = RwSignal::new(None::<HeadDrag>);
+    // The click that ends a column move must not also sort.
+    let swallow_click = StoredValue::new(false);
+    let root = crate::util::document_element;
+    on_cleanup(move || {
+        let _ = root().class_list().remove_2("col-resizing", "col-moving");
+    });
+    let set_width = move |id: &'static str, w: Option<f64>| {
+        prefs.update(|p| match w {
+            Some(w) => {
+                p.widths.insert(id.to_string(), w);
+            }
+            None => {
+                p.widths.remove(id);
+            }
+        });
+    };
+    let end_resize = move || {
+        if resizing.get_value().is_some() {
+            resizing.set_value(None);
+            let _ = root().class_list().remove_1("col-resizing");
+            persist.run(());
+        }
+    };
+    // Slot under pointer x among the header cells (the dragged one counted where it sits).
+    let slot_at = move |x: f64, dragged: &'static str, dx: f64| -> Option<usize> {
+        let head = head_ref.get_untracked()?;
+        let cells = head.query_selector_all(".dt-th[data-col]").ok()?;
+        let n = cells.length();
+        for k in 0..n {
+            let Some(el) = cells.item(k).and_then(|e| e.dyn_into::<web_sys::Element>().ok()) else { continue };
+            let r = el.get_bounding_client_rect();
+            let left = r.left() - if el.get_attribute("data-col").as_deref() == Some(dragged) { dx } else { 0.0 };
+            if x < left + r.width() / 2.0 {
+                return Some(k as usize);
+            }
+        }
+        Some(n as usize)
+    };
+    let end_move = move |commit: bool| {
+        let Some(d) = head_drag.get_untracked() else { return };
+        head_drag.set(None);
+        if !d.active {
+            return;
+        }
+        let _ = root().class_list().remove_1("col-moving");
+        swallow_click.set_value(true);
+        if let (true, Some(to)) = (commit, d.drop) {
+            let visible = visible_ids.get_untracked();
+            prefs.update(|p| {
+                materialize(p, &col_defaults());
+                move_column(&mut p.order, &visible, d.id, to);
+            });
+            persist.run(());
+        }
+    };
+
     let all_selected = move || selection.map(|s| matches!(s.get(), Selection::All { .. })).unwrap_or(false);
 
     view! {
@@ -413,7 +541,7 @@ where
             <div class="dt-cols"><crate::ds::MenuButton entries=chooser icon="sliders" title="Columns" /></div>
             <div class="dt-scroll" node_ref=scroller on:scroll=on_scroll>
                 <div class="dt-inner" style=move || format!("min-width:{}px", min_w.get())>
-                    <div class="dt-head" role="row" style=move || format!("grid-template-columns:{}", template.get())>
+                    <div class="dt-head" role="row" node_ref=head_ref style=move || format!("grid-template-columns:{}", template.get())>
                         {selection.map(|sel| view! {
                             <div class="dt-cell dt-check" role="columnheader">
                                 <input type="checkbox" aria-label="Select all" prop:checked=all_selected
@@ -423,21 +551,90 @@ where
                                     } />
                             </div>
                         })}
-                        {move || visible_cols.get().into_iter().map(|c| {
+                        {move || { let cols = visible_cols.get(); let n = cols.len(); cols.into_iter().enumerate().map(|(idx, c)| {
                             let key = c.sort;
+                            let id = c.id;
                             let active = move || key.map(|k| sort.with(|(s, _)| s == k)).unwrap_or(false);
                             let arrow = move || {
                                 if active() { if sort.with(|(_, d)| *d) { "arrow-down" } else { "arrow-up" } } else { "" }
                             };
+                            let base = format!("dt-cell dt-th{}{}", if c.right { " r" } else { "" }, if key.is_some() { " sortable" } else { "" });
+                            let class = move || {
+                                let (moving, drop) = head_drag.with(|d| match d {
+                                    Some(d) if d.active => (d.id == id, d.drop),
+                                    _ => (false, None),
+                                });
+                                let marker = match drop {
+                                    Some(k) if k == idx => " drop-before",
+                                    Some(k) if k == n && idx + 1 == n => " drop-after",
+                                    _ => "",
+                                };
+                                format!("{base}{}{marker}", if moving { " moving" } else { "" })
+                            };
                             view! {
-                                <div class=format!("dt-cell dt-th{}{}", if c.right { " r" } else { "" }, if key.is_some() { " sortable" } else { "" })
+                                <div class=class data-col=id
                                     role="columnheader" aria-sort=move || if active() { Some(if sort.with(|(_, d)| *d) { "descending" } else { "ascending" }) } else { None }
-                                    on:click=move |_| if let Some(k) = key { header_click(k) }>
+                                    style=move || head_drag.with(|d| match d { Some(d) if d.active && d.id == id => format!("transform:translateX({}px)", d.dx), _ => String::new() })
+                                    title="Click to sort · drag to move"
+                                    on:click=move |_| {
+                                        if swallow_click.get_value() { swallow_click.set_value(false); return; }
+                                        if let Some(k) = key { header_click(k) }
+                                    }
+                                    on:pointerdown=move |ev: web_sys::PointerEvent| {
+                                        swallow_click.set_value(false);
+                                        if ev.button() != 0 { return; }
+                                        if let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) {
+                                            let _ = el.set_pointer_capture(ev.pointer_id());
+                                        }
+                                        head_drag.set(Some(HeadDrag { id, from: idx, x0: ev.client_x() as f64, dx: 0.0, active: false, drop: None }));
+                                    }
+                                    on:pointermove=move |ev: web_sys::PointerEvent| {
+                                        let Some(mut d) = head_drag.get_untracked().filter(|d| d.id == id) else { return };
+                                        let x = ev.client_x() as f64;
+                                        d.dx = x - d.x0;
+                                        if !d.active {
+                                            if d.dx.abs() < MOVE_THRESHOLD { return; }
+                                            d.active = true;
+                                            let _ = root().class_list().add_1("col-moving");
+                                        }
+                                        d.drop = slot_at(x, id, d.dx).and_then(|to| drop_slot(d.from, to));
+                                        head_drag.set(Some(d));
+                                    }
+                                    on:pointerup=move |_| end_move(true)
+                                    on:pointercancel=move |_| end_move(false)
+                                    on:lostpointercapture=move |_| end_move(false)>
                                     <span class="truncate">{c.label}</span>
                                     {move || { let a = arrow(); (!a.is_empty()).then(|| view! { <Icon name=a size=12 /> }) }}
+                                    <span class="dt-resize" aria-hidden="true" title="Drag to resize · double-click to reset"
+                                        on:click=|ev: web_sys::MouseEvent| ev.stop_propagation()
+                                        on:dblclick=move |ev: web_sys::MouseEvent| {
+                                            ev.stop_propagation();
+                                            set_width(id, None);
+                                            persist.run(());
+                                        }
+                                        on:pointerdown=move |ev: web_sys::PointerEvent| {
+                                            ev.stop_propagation();
+                                            if ev.button() != 0 { return; }
+                                            ev.prevent_default();
+                                            let Some(el) = ev.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) else { return };
+                                            let _ = el.set_pointer_capture(ev.pointer_id());
+                                            // Start from the rendered width: a growing column is wider than its minimum.
+                                            let w = el.parent_element().map(|p| p.get_bounding_client_rect().width()).unwrap_or(c.width);
+                                            resizing.set_value(Some((id, ev.client_x() as f64, w)));
+                                            let _ = root().class_list().add_1("col-resizing");
+                                        }
+                                        on:pointermove=move |ev: web_sys::PointerEvent| {
+                                            ev.stop_propagation();
+                                            if let Some((_, x0, w0)) = resizing.get_value().filter(|r| r.0 == id) {
+                                                set_width(id, Some((w0 + ev.client_x() as f64 - x0).max(MIN_COL_W).round()));
+                                            }
+                                        }
+                                        on:pointerup=move |ev: web_sys::PointerEvent| { ev.stop_propagation(); end_resize() }
+                                        on:pointercancel=move |ev: web_sys::PointerEvent| { ev.stop_propagation(); end_resize() }>
+                                    </span>
                                 </div>
                             }
-                        }).collect_view()}
+                        }).collect_view() }}
                     </div>
                     <div class="dt-body" style=move || format!("height:{}px", total.get().unwrap_or(0) as f64 * row_h.get())>
                         <For each=move || { let (a, b) = range.get(); a..b } key=|i| *i let:i>
@@ -515,5 +712,51 @@ mod tests {
     fn grid_template_mixes_fixed_and_flexible() {
         assert_eq!(grid_template(&[(60.0, false), (240.0, true), (80.0, false)], true), "40px 60px minmax(240px, 1fr) 80px");
         assert_eq!(grid_template(&[(100.0, true)], false), "minmax(100px, 1fr)");
+    }
+
+    #[test]
+    fn grid_template_fills_when_no_column_grows() {
+        assert_eq!(grid_template(&[(60.0, false), (80.0, false)], false), "60px 80px minmax(0, 1fr)");
+    }
+
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn move_column_keeps_hidden_columns_in_place() {
+        // "plays" is hidden: moves are among a, b, c only.
+        let visible = ["a", "b", "c"];
+        let mut o = ids(&["a", "plays", "b", "c"]);
+        move_column(&mut o, &visible, "c", 0);
+        assert_eq!(o, ids(&["c", "a", "plays", "b"]));
+        let mut o = ids(&["a", "plays", "b", "c"]);
+        move_column(&mut o, &visible, "a", 3);
+        assert_eq!(o, ids(&["plays", "b", "c", "a"]));
+        let mut o = ids(&["a", "plays", "b", "c"]);
+        move_column(&mut o, &visible, "a", 2);
+        assert_eq!(o, ids(&["plays", "b", "a", "c"]));
+    }
+
+    #[test]
+    fn drop_next_to_itself_is_no_move() {
+        assert_eq!(drop_slot(2, 2), None);
+        assert_eq!(drop_slot(2, 3), None);
+        assert_eq!(drop_slot(2, 0), Some(0));
+        assert_eq!(drop_slot(2, 4), Some(4));
+    }
+
+    #[test]
+    fn materialize_pins_defaults_and_appends_new_columns() {
+        let cols = [("a", false), ("b", true), ("c", false)];
+        let mut p = ColumnPrefs::default();
+        materialize(&mut p, &cols);
+        assert_eq!(p.hidden, ids(&["b"]));
+        assert_eq!(p.order, ids(&["a", "b", "c"]));
+        // a saved order from before "b" existed
+        let mut p = ColumnPrefs { order: ids(&["c", "a"]), hidden: vec![], widths: Default::default() };
+        materialize(&mut p, &cols);
+        assert!(p.hidden.is_empty());
+        assert_eq!(p.order, ids(&["c", "a", "b"]));
     }
 }

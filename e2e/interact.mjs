@@ -1,4 +1,4 @@
-// Interaction smoke: command palette, scoped shortcuts, theme persistence, table sort/selection.
+// Interaction smoke: command palette, scoped shortcuts, theme persistence, table sort/selection/column drag.
 import { chromium } from 'playwright-core'
 const base = process.argv[2] ?? 'http://127.0.0.1:8420'
 import { guard } from './guard.mjs'
@@ -73,6 +73,31 @@ await page.locator('.dt-row .dt-check').nth(5).click({ modifiers: ['Shift'] })
 await page.waitForTimeout(200)
 const n = await page.locator('.dt-row.sel').count()
 check('shift-range selects 5 rows', n === 5)
+
+// table: drag a header's right edge to resize, drag the header to move the column
+const hdrag = async (sel, dx) => {
+  const b = await page.locator(sel).boundingBox()
+  const x = b.x + b.width / 2, y = b.y + b.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  for (let i = 1; i <= 10; i++) await page.mouse.move(x + (dx * i) / 10, y)
+  await page.mouse.up()
+  await page.waitForTimeout(250)
+}
+const colW = (id) => page.$eval(`.dt-th[data-col="${id}"]`, (e) => e.getBoundingClientRect().width)
+const bpmW = await colW('bpm')
+await hdrag('.dt-th[data-col="bpm"] .dt-resize', 50)
+check('header edge resizes the column', Math.abs((await colW('bpm')) - bpmW - 50) <= 2)
+const cols = () => page.$$eval('.dt-th[data-col]', (els) => els.map((e) => e.dataset.col))
+const tb = await page.locator('.dt-th[data-col="duration"]').boundingBox()
+const ab = await page.locator('.dt-th[data-col="artist"]').boundingBox()
+await hdrag('.dt-th[data-col="duration"]', ab.x + 10 - (tb.x + tb.width / 2))
+const order = await cols()
+check('dragging a header moves the column', order.indexOf('duration') === order.indexOf('artist') - 1)
+await page.locator('.dt-cols button').click()
+await page.getByText('Reset widths and order').click()
+await page.waitForTimeout(250)
+check('column layout resets', (await cols()).indexOf('duration') > (await cols()).indexOf('artist'))
 console.log(fails.length ? `${fails.length} FAILED` : 'all interaction checks passed')
 await browser.close()
 process.exit(fails.length ? 1 : 0)

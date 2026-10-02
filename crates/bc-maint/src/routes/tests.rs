@@ -274,6 +274,25 @@ async fn delete_track_and_release_routes() {
 }
 
 #[tokio::test]
+async fn deleting_the_last_track_takes_the_release() {
+    let env = test_env();
+    let (music, root) = music_root(&env);
+    let a = album_on_disk(&env, root, &music, "Producer", "Emptied", 2, &[], None);
+    std::fs::write(a.folder.join("cover.jpg"), [0xffu8, 0xd8, 0xff]).unwrap();
+    exec(&env.db, &format!("INSERT INTO artwork(release_id,version,sizes) VALUES ({},'v1',7)", a.release));
+    let app = app(&env, false);
+    let first = q_i64(&env.db, &format!("SELECT MIN(id) FROM tracks WHERE release_id={}", a.release));
+    let last = q_i64(&env.db, &format!("SELECT MAX(id) FROM tracks WHERE release_id={}", a.release));
+    assert_eq!(call(&app, "DELETE", &format!("/tracks/{first}"), None).await.0, StatusCode::OK);
+    assert_eq!(q_i64(&env.db, &format!("SELECT COUNT(*) FROM releases WHERE id={}", a.release)), 1, "a release with tracks left stays");
+    assert!(a.folder.exists());
+    assert_eq!(call(&app, "DELETE", &format!("/tracks/{last}"), None).await.0, StatusCode::OK);
+    assert_eq!(q_i64(&env.db, &format!("SELECT COUNT(*) FROM releases WHERE id={}", a.release)), 0, "the emptied release goes");
+    assert_eq!(q_i64(&env.db, "SELECT COUNT(*) FROM artwork"), 0);
+    assert!(!a.folder.exists(), "the sidecar cover must not keep the folder alive");
+}
+
+#[tokio::test]
 async fn delete_label_takes_the_catalogue_and_the_inbox_evidence() {
     let env = test_env();
     let (music, root) = music_root(&env);
