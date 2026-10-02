@@ -71,3 +71,8 @@ tower = { version = "0.5.3", features = ["util"] }
 tempfile = "3.27.0"
 http = "1"
 tokio = { version = "1.53.1", features = ["full", "test-util"] }
+
+# keyring 3 falls back to an in-memory mock store on platforms without an enabled backend; macOS
+# uses the Keychain (see bc-libcore).
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"], optional = true }

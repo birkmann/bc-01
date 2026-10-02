@@ -103,7 +103,7 @@ pub fn CrateDig(shelves: Shelves, session_seed: i64) -> impl IntoView {
     let total = Memo::new(move |_| {
         if is_default() {
             // the shelf only hands out one page; the true size comes with the first query
-            shelves.get().map(|s| s.crate_dig.len()).unwrap_or(0).max(logic::CRATE_PER_PAGE + 1)
+            logic::crate_total_guess(shelves.get().map(|s| s.crate_dig.len()).unwrap_or(0))
         } else {
             dealt_data.get().map(|d| d.total as usize).unwrap_or(0)
         }

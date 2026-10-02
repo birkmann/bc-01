@@ -11,7 +11,14 @@ pub fn lower_thread_priority(nice: i32) {
         let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
         let _ = libc::setpriority(libc::PRIO_PROCESS, tid, nice);
     }
-    #[cfg(all(unix, not(target_os = "linux")))]
+    // macOS: no per-thread nice (PRIO_PROCESS 0 would renice the server and the player too); the
+    // utility QoS class is the per-thread equivalent of a positive nice.
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let _ = nice;
+        let _ = libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+    }
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
     unsafe {
         let _ = libc::setpriority(libc::PRIO_PROCESS, 0, nice);
     }

@@ -3,7 +3,6 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use bc_db::Db;
 
@@ -206,7 +205,7 @@ fn kill_orphans_linux(staging_dirs: &[PathBuf], binary: &str) -> usize {
             if !Path::new(&format!("/proc/{pid}")).exists() || is_zombie(pid) {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
     killed

@@ -91,7 +91,6 @@ pub fn NavLinks() -> impl IntoView {
                 }).collect_view()}
             }).collect_view()}
         </Show>
-        <div class="sb-section">"Tags"</div>
         <TopTags />
         <NavRow item=SETTINGS trailing=none_str() active_dot=Signal::derive(|| false) />
     }
@@ -100,13 +99,17 @@ pub fn NavLinks() -> impl IntoView {
 #[component]
 fn TopTags() -> impl IntoView {
     let tags = use_query::<Vec<TagOut>>(|| Some(QuerySpec::new("/tags?limit=14", &["tag"])));
+    // no heading over an empty library
     view! {
-        <div class="sb-tags">
-            {move || tags.data.get().map(|t| t.iter().take(14).map(|t| {
-                let href = format!("/tracks?tag={}", crate::util::enc(&t.name));
-                view! { <a class="chip" href=href style=format!("--tag-h:{}", crate::util::tag_hue(&t.name)) title=format!("{} tracks", t.track_count)>{t.name.clone()}</a> }
-            }).collect_view())}
-        </div>
+        {move || tags.data.get().filter(|t| !t.is_empty()).map(|t| view! {
+            <div class="sb-section">"Tags"</div>
+            <div class="sb-tags">
+                {t.iter().take(14).map(|t| {
+                    let href = format!("/tracks?tag={}", crate::util::enc(&t.name));
+                    view! { <a class="chip" href=href style=format!("--tag-h:{}", crate::util::tag_hue(&t.name)) title=format!("{} tracks", t.track_count)>{t.name.clone()}</a> }
+                }).collect_view()}
+            </div>
+        })}
     }
 }
 

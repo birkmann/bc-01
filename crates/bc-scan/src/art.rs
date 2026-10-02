@@ -84,9 +84,16 @@ fn low_priority_pool(threads: usize) -> Option<rayon::ThreadPool> {
         .start_handler(|_| {
             // Nice the converter: interactive reads and the player come first. Failure is harmless.
             // SAFETY: plain syscalls with no pointers; gettid has no preconditions.
+            #[cfg(target_os = "linux")]
             unsafe {
                 let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
                 libc::setpriority(libc::PRIO_PROCESS, tid, 10);
+            }
+            // macOS has no per-thread nice (PRIO_PROCESS would renice the whole app); the utility
+            // QoS class is its equivalent. SAFETY: only affects the calling thread.
+            #[cfg(target_os = "macos")]
+            unsafe {
+                libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
             }
         })
         .build()

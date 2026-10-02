@@ -95,6 +95,11 @@ impl Config {
 }
 
 fn default_data_dir() -> PathBuf {
+    // macOS keeps app data under ~/Library/Application Support, not the XDG layout.
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join("Library/Application Support/bc-rust");
+    }
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))

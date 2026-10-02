@@ -1,0 +1,61 @@
+name: Release
+
+# Builds the macOS disk image. On a version tag (v*) it is attached to a GitHub release; a manual
+# run keeps it as a workflow artifact. Linux installs build from source (scripts/install.sh,
+# packaging/PKGBUILD).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    # Apple silicon.
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Install brotli
+        run: command -v brotli || brew install brotli
+      - name: Build app and disk image
+        run: ./packaging/macos/build-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bc-macos-arm64.dmg
+          path: target/macos/bc-macos-*.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled()
+    needs: [macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*.dmg)
+          if (( ${#files[@]} == 0 )); then echo "Nothing was built."; exit 1; fi
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "bc ${GITHUB_REF_NAME#v}" --generate-notes "${files[@]}"
+          fi

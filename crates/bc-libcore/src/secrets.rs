@@ -1,5 +1,5 @@
 //! Secret storage (the Bandcamp identity cookie): the OS keyring (`keyring` crate; Secret Service on
-//! Linux), falling back to a `0600` file under `<data_dir>/secrets/` when no keyring is reachable
+//! Linux, the Keychain on macOS), falling back to a `0600` file under `<data_dir>/secrets/` when no keyring is reachable
 //! (headless machines). Values are never logged and never returned by any API.
 //!
 //! WS2 (bandcamp) uses [`Secrets::get`]/[`Secrets::set`] with the name [`BANDCAMP_COOKIE`].

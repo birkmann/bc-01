@@ -6,7 +6,7 @@
 //! It grants **full account access**, including purchase history, so:
 //!
 //! * it is stored in the OS keyring when available (feature `os-keyring`,
-//!   Secret Service on Linux), otherwise in `<data_dir>/identity.cookie`
+//!   Secret Service on Linux, the Keychain on macOS), otherwise in `<data_dir>/identity.cookie`
 //!   created with mode 0600 (temp file + rename);
 //! * it is never returned by any endpoint -- only a redacted [`fingerprint`];
 //! * it is never logged: hold it in a [`Secret`] (`Debug`/`Display` print

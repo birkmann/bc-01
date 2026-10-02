@@ -24,7 +24,9 @@ pub fn safe_join(base: &Path, rel: &Path) -> Result<PathBuf, UnsafePath> {
 /// True ancestry check on canonicalised paths (resolves symlinks for the
 /// longest existing prefix, so not-yet-created files can be checked too).
 pub fn is_within(base: &Path, candidate: &Path) -> Result<(), UnsafePath> {
-    let base_c = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    // Both sides resolve the same way: a base that does not exist yet under a symlinked parent
+    // (macOS: /var → /private/var) must still contain its own children.
+    let base_c = canonicalize_existing_prefix(base);
     let cand_c = canonicalize_existing_prefix(candidate);
     if cand_c.starts_with(&base_c) {
         Ok(())

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>bc · music library &amp; player for linux</title>
-<meta name="description" content="bc is a free and open source music library and player for Linux, written in Rust, with Bandcamp search and downloads built in.">
+<title>bc · music library &amp; player for linux and macos</title>
+<meta name="description" content="bc is a free and open source music library and player for Linux and macOS, written in Rust, with Bandcamp search and downloads built in.">
 <meta name="theme-color" content="#F4F3EF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C0C0C" media="(prefers-color-scheme: dark)">
 <script>
@@ -20,9 +20,9 @@ try {
 <link rel="preload" href="assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
 <meta property="og:type" content="website">
-<meta property="og:title" content="bc · music library &amp; player for linux">
-<meta property="og:description" content="Music library and player for Linux with Bandcamp search and downloads. Written in Rust, free and open source.">
-<meta property="og:image" content="assets/img/og.png?v=2">
+<meta property="og:title" content="bc · music library &amp; player for linux and macos">
+<meta property="og:description" content="Music library and player for Linux and macOS with Bandcamp search and downloads. Written in Rust, free and open source.">
+<meta property="og:image" content="assets/img/og.png?v=3">
 <meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
@@ -45,7 +45,7 @@ try {
         <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
         <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
       </button>
-      <a class="pill pill-ink" href="#install">Install</a>
+      <a class="pill pill-ink" href="#install">Download</a>
     </div>
   </nav>
 </header>
@@ -53,11 +53,11 @@ try {
 <main id="main">
 
 <section class="wrap hero" id="top">
-  <span class="label">linux · v0.1.0 · free &amp; open source</span>
+  <span class="label">linux &amp; macos · v0.1.0 · free &amp; open source</span>
   <h1>Music library<br>and player</h1>
   <p class="lead">bc manages and plays your local music collection. Bandcamp search and downloads are built in. Written in Rust.</p>
   <div class="actions">
-    <a class="pill pill-signal" href="#install">Install for Linux</a>
+    <a class="pill pill-signal" href="#install">Download</a>
     <a class="pill pill-outline" href="https://github.com/birkmann/bc-01">View source</a>
   </div>
 </section>
@@ -71,7 +71,7 @@ try {
 
 <section class="wrap specs" aria-label="Specifications">
   <dl>
-    <div><dt>Platform</dt><dd>Linux</dd></div>
+    <div><dt>Platform</dt><dd>Linux, macOS</dd></div>
     <div><dt>Language</dt><dd>Rust</dd></div>
     <div><dt>Database</dt><dd>SQLite with full-text search</dd></div>
     <div><dt>License</dt><dd>MIT</dd></div>
@@ -83,7 +83,7 @@ try {
   <div class="grid features">
     <article><span class="idx">01</span><h3>Library</h3><p>Scans your music folders into SQLite. Albums, artists, labels, tags, loved tracks, favourites, play history and Top 10. Full-text search, no row limit.</p></article>
     <article><span class="idx">02</span><h3>Metadata</h3><p>Edit tags with a dry run and undo. Clean up junk files and strays, check releases for missing tracks, move library folders.</p></article>
-    <article><span class="idx">03</span><h3>Player</h3><p>Gapless playback, queue, history, shuffle and auto-fill. EQ, filter and limiter. MPRIS media keys and a tray icon.</p></article>
+    <article><span class="idx">03</span><h3>Player</h3><p>Gapless playback, queue, history, shuffle and auto-fill. EQ, filter and limiter. Media keys on Linux (MPRIS) and macOS.</p></article>
     <article><span class="idx">04</span><h3>Analysis</h3><p>Tempo, key, energy, EBU R128 loudness and a three-band waveform for every track.</p></article>
     <article><span class="idx">05</span><h3>Recommendations</h3><p>Next up, similar tracks and taste, computed locally from your library and listening history.</p></article>
     <article><span class="idx">06</span><h3>Bandcamp</h3><p>Search Bandcamp, browse tag pages, preview releases, follow artists and labels, and browse other fans' collections.</p></article>
@@ -108,7 +108,7 @@ try {
 
 <section class="wrap section" id="player">
   <h2>Player</h2>
-  <p class="lead narrow">A native audio engine with gapless playback, EQ, filter, echo, limiter and key lock. Queue, history, shuffle and auto-fill. Media keys work through MPRIS. The same audio code runs in the browser, so a phone on the local network can open bc and play through its own speaker.</p>
+  <p class="lead narrow">A native audio engine with gapless playback, EQ, filter, echo, limiter and key lock. Queue, history, shuffle and auto-fill. Media keys work through MPRIS on Linux and Now Playing on macOS. The same audio code runs in the browser, so a phone on the local network can open bc and play through its own speaker.</p>
 </section>
 
 <section class="dark" id="bandcamp">
@@ -132,12 +132,12 @@ try {
 
 <section class="wrap section" id="stack">
   <h2>Built with Rust</h2>
-  <p class="lead narrow">A workspace of 23 crates, including the interface. The desktop app runs the server and shows the UI in a Chromium or Firefox app window. Other devices on the local network can open the same UI after pairing.</p>
+  <p class="lead narrow">A workspace of 23 crates, including the interface. The desktop app runs the server and shows the UI in a native window on macOS, or in a Chromium or Firefox app window on Linux. Other devices on the local network can open the same UI after pairing.</p>
   <ul class="grid hardware">
     <li><span class="hw">Leptos interface, compiled to WebAssembly</span><span class="proto">bc-ui</span></li>
     <li><span class="hw">axum server with a typed WebSocket hub</span><span class="proto">bc-server</span></li>
     <li><span class="hw">SQLite in WAL mode, FTS5 search, one writer</span><span class="proto">bc-db</span></li>
-    <li><span class="hw">Real-time audio engine on cpal, MPRIS</span><span class="proto">bc-engine</span></li>
+    <li><span class="hw">Real-time audio engine on cpal, media keys</span><span class="proto">bc-engine</span></li>
     <li><span class="hw">EQ, filters, echo, key lock</span><span class="proto">bc-dsp · native + wasm</span></li>
     <li><span class="hw">Tempo, key, loudness, waveforms</span><span class="proto">bc-analysis</span></li>
     <li><span class="hw">GPU waveforms, WebGL2 with Canvas2D fallback</span><span class="proto">bc-waveform</span></li>
@@ -150,12 +150,24 @@ try {
   <div class="wrap section">
     <svg class="mark mark-lg" viewBox="0 0 100 100" fill="none" aria-hidden="true"><circle cx="50" cy="50" r="36" stroke="#F4F3EF" stroke-width="6"/><circle cx="50" cy="50" r="15" fill="#01FF95"/></svg>
     <h2>Install</h2>
-    <p class="lead">Builds from source and installs into <code>~/.local</code>. No root needed.</p>
-    <div class="code" role="group" aria-label="Install commands">
-      <pre><code><span class="prompt">$</span> git clone https://github.com/birkmann/bc-01.git bc
+    <p class="lead">bc runs on macOS and Linux.</p>
+    <div class="platforms">
+      <div class="platform" id="macos">
+        <h3>macOS</h3>
+        <p>For Macs with Apple silicon, macOS 12 or later. Open the disk image and drag bc to Applications.</p>
+        <a class="pill pill-signal" href="https://github.com/birkmann/bc-01/releases/latest/download/bc-macos-arm64.dmg">Download for macOS</a>
+        <p class="note">bc is not notarized by Apple yet, so macOS blocks the first launch. Open System Settings → Privacy &amp; Security and choose <b>Open Anyway</b>.</p>
+      </div>
+      <div class="platform" id="linux">
+        <h3>Linux</h3>
+        <p>Build from source and install into <code>~/.local</code>. No root needed.</p>
+        <div class="code" role="group" aria-label="Install commands">
+          <pre><code><span class="prompt">$</span> git clone https://github.com/birkmann/bc-01.git bc
 <span class="prompt">$</span> cd bc &amp;&amp; ./scripts/install.sh
 <span class="prompt">$</span> bc-desktop</code></pre>
-      <button class="copy-btn" type="button" data-copy="git clone https://github.com/birkmann/bc-01.git bc &amp;&amp; cd bc &amp;&amp; ./scripts/install.sh">Copy</button>
+          <button class="copy-btn" type="button" data-copy="git clone https://github.com/birkmann/bc-01.git bc &amp;&amp; cd bc &amp;&amp; ./scripts/install.sh">Copy</button>
+        </div>
+      </div>
     </div>
     <div class="install-more">
       <div>
@@ -163,8 +175,8 @@ try {
         <p><code>cd packaging &amp;&amp; makepkg -si</code> installs <code>bc-desktop</code>, the <code>bc-rust</code> command line tool and the icons system-wide.</p>
       </div>
       <div>
-        <h3>Requirements</h3>
-        <p>Rust (stable) with the <code>wasm32-unknown-unknown</code> target, <code>trunk</code>, <code>wasm-bindgen</code>, <code>brotli</code>, ALSA, OpenSSL and D-Bus, plus Chromium, Chrome, Brave or Firefox for the app window.</p>
+        <h3>Build from source</h3>
+        <p>Rust (stable) with the <code>wasm32-unknown-unknown</code> target, <code>trunk</code> and <code>brotli</code>; on Linux also ALSA, OpenSSL and D-Bus, plus Chromium, Chrome, Brave or Firefox for the app window. On macOS, <code>./packaging/macos/build-app.sh</code> builds the app.</p>
       </div>
       <div>
         <h3>Phone &amp; browser</h3>
@@ -172,7 +184,7 @@ try {
       </div>
     </div>
     <div class="actions">
-      <a class="pill pill-signal" href="https://github.com/birkmann/bc-01">Source code</a>
+      <a class="pill pill-outline-light" href="https://github.com/birkmann/bc-01">Source code</a>
       <a class="pill pill-outline-light" href="https://github.com/birkmann/bc-01#readme">Read the manual</a>
     </div>
   </div>

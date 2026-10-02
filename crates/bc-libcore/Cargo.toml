@@ -19,6 +19,11 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
+# keyring 3 falls back to an in-memory mock store on platforms without an enabled backend, so
+# macOS needs its own (Keychain); without it the cookie would be lost on restart.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

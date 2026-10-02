@@ -13,7 +13,6 @@ use leptos::task::spawn_local;
 use crate::api;
 use crate::data::{QuerySpec, use_query, use_topic};
 use crate::ds::{Button, ErrorPanel, Icon, PageHeader, Skeleton, Variant, toast_err};
-use crate::logic::format::format_count;
 use crate::pages::albums::host::{LibraryHost, library_listing, play_items, play_release, provide_library_host};
 use crate::player::use_player;
 use crate::widgets::common::{Art, label_link};
@@ -23,9 +22,11 @@ mod logic;
 mod parts;
 mod rail;
 mod shelves;
+mod welcome;
 
 use rail::{Favorites, Layout, StatTiles, TopTen};
 use shelves::{CrateDig, DiscoveryShelves, DustOff, NewInLibrary, RecentlyPlayed, TopArtists};
+use welcome::Welcome;
 
 thread_local! {
     /// One draw per page load: the shelves keep their hand until Refresh deals a new one.
@@ -91,6 +92,27 @@ pub fn HomePage() -> impl IntoView {
     };
     let refresh = Arc::new(refresh);
 
+    // ---- first run: no tracks yet --------------------------------------------------------------------
+    // The snapshot never redraws by itself, but an empty one has nothing to protect: the
+    // first release to land (a scan, a download, an import) brings the shelves in.
+    let empty = Memo::new(move |_| shelves.get().is_some_and(|s| s.stats.tracks == 0));
+    let filled_for = StoredValue::new(None::<i64>);
+    {
+        let rf = refresh.clone();
+        Effect::new(move |_| {
+            if let Some(id) = latest.get().filter(|_| empty.get())
+                && filled_for.get_value() != Some(id)
+            {
+                filled_for.set_value(Some(id));
+                rf();
+            }
+        });
+    }
+    let on_filled = {
+        let rf = refresh.clone();
+        Callback::new(move |_: ()| rf())
+    };
+
     // ---- play library / shuffle --------------------------------------------------------------------
     let starting = RwSignal::new(None::<bool>);
     let start = Arc::new(move |shuffle: bool| {
@@ -107,7 +129,10 @@ pub fn HomePage() -> impl IntoView {
     let (st1, st2) = (start.clone(), start);
 
     let subtitle = Signal::derive(move || {
-        shelves.get().map(|s| format!("{} albums · {} tracks · {} artists", format_count(s.stats.releases), format_count(s.stats.tracks), format_count(s.stats.artists)))
+        if empty.get() {
+            return Some("Nothing in the library yet".to_string());
+        }
+        shelves.get().map(|s| logic::library_summary(s.stats.releases, s.stats.tracks, s.stats.artists))
     });
     let rf = refresh.clone();
 
@@ -116,20 +141,24 @@ pub fn HomePage() -> impl IntoView {
             <PageHeader title="Home" subtitle=subtitle
                 actions=crate::ds::children(move || {
                     let (st1, st2, rf) = (st1.clone(), st2.clone(), rf.clone());
-                    view! {
-                        <button type="button" class="hm-refresh" class:fresh=move || fresh.get() disabled=move || refreshing.get()
-                            title=move || if fresh.get() { "New in the library: refresh the shelves" } else { "Refresh the shelves" }
-                            aria-label=move || if fresh.get() { "Refresh the shelves, new content available" } else { "Refresh the shelves" }
-                            on:click=move |_| rf()>
-                            <Icon name="refresh" size=14 />
-                            <span class="hide-sm">"Refresh"</span>
-                            {move || fresh.get().then(|| view! { <span class="hm-dot" aria-hidden="true"></span> })}
-                        </button>
-                        <div class="hm-libplay" role="group" aria-label="Whole library">
-                            <Button icon="play" busy=Signal::derive(move || starting.get() == Some(false)) title="Play the whole library" on_click=move |_| st1(false)><span class="hide-sm">"Play library"</span></Button>
-                            <Button icon="shuffle" title="Shuffle the whole library" busy=Signal::derive(move || starting.get() == Some(true)) on_click=move |_| st2(true) />
-                        </div>
-                    }
+                    // nothing to refresh or play on an empty library
+                    move || (!empty.get()).then(|| {
+                        let (st1, st2, rf) = (st1.clone(), st2.clone(), rf.clone());
+                        view! {
+                            <button type="button" class="hm-refresh" class:fresh=move || fresh.get() disabled=move || refreshing.get()
+                                title=move || if fresh.get() { "New in the library: refresh the shelves" } else { "Refresh the shelves" }
+                                aria-label=move || if fresh.get() { "Refresh the shelves, new content available" } else { "Refresh the shelves" }
+                                on:click=move |_| rf()>
+                                <Icon name="refresh" size=14 />
+                                <span class="hide-sm">"Refresh"</span>
+                                {move || fresh.get().then(|| view! { <span class="hm-dot" aria-hidden="true"></span> })}
+                            </button>
+                            <div class="hm-libplay" role="group" aria-label="Whole library">
+                                <Button icon="play" busy=Signal::derive(move || starting.get() == Some(false)) title="Play the whole library" on_click=move |_| st1(false)><span class="hide-sm">"Play library"</span></Button>
+                                <Button icon="shuffle" title="Shuffle the whole library" busy=Signal::derive(move || starting.get() == Some(true)) on_click=move |_| st2(true) />
+                            </div>
+                        }
+                    })
                 }) />
             <div class="page-scroll hm">
                 {move || {
@@ -139,6 +168,10 @@ pub fn HomePage() -> impl IntoView {
                     }
                     if shelves.get().is_none() {
                         return view! { <HomeSkeleton /> }.into_any();
+                    }
+                    if empty.get() {
+                        let roots = shelves.get_untracked().map(|s| s.stats.roots.clone()).unwrap_or_default();
+                        return view! { <Welcome roots=roots on_filled=on_filled /> }.into_any();
                     }
                     view! {
                         <div class="hm-cols" style=move || format!("--hm-rail-w:{}px", rail_w.get())>

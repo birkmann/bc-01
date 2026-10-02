@@ -2,13 +2,13 @@
   <img src="packaging/icons/bc-128.png" width="96" height="96" alt="">
 </p>
 <h1 align="center">bc</h1>
-<p align="center"><b>bandcamp library &amp; dj tool for linux</b><br>
+<p align="center"><b>bandcamp library &amp; dj tool for linux and macos</b><br>
 <a href="#installing">Install</a> · <a href="#using-it">Manual</a></p>
 
 ![The bc home screen](website/assets/img/bc-home.png)
 
-bc is a Linux app for finding and downloading music on Bandcamp, managing a
-local music library, analyzing tracks, and playing and building DJ sets. It is
+bc is an app for Linux and macOS for finding and downloading music on Bandcamp,
+managing a local music library, analyzing tracks, and playing and building DJ sets. It is
 written in Rust and replaces an earlier Python/React version of bc.
 
 ## What it does
@@ -38,7 +38,8 @@ written in Rust and replaces an earlier Python/React version of bc.
 - **Player.** Audio engine on cpal with gapless playback, EQ, filter, echo,
   limiter, key lock and five transition types. An optional second output
   device pre-listens on headphones while the main output keeps playing. Queue, history, shuffle and
-  auto-fill. MPRIS media keys and a tray icon. The same DSP code runs in the
+  auto-fill. Media keys (MPRIS on Linux, Now Playing on macOS) and a tray icon on
+  Linux. The same DSP code runs in the
   browser as an AudioWorklet, so a phone can play through its own speaker.
 - **DJ sets.** Automix orders a pool of tracks by key and tempo compatibility
   (beam search). Sets can be edited in Plan or on the two-lane Arrange
@@ -46,12 +47,13 @@ written in Rust and replaces an earlier Python/React version of bc.
   set clock. Sets can be rendered to WAV or MP3.
 - **Recommendations.** Next up, similar tracks and taste, computed locally.
 - **Desktop and phone.** `bc-desktop` runs the server and opens the UI in a
-  Chromium or Firefox app window. `bc-rust serve --lan` serves the UI to other devices on
+  native window on macOS, or in a Chromium or Firefox app window on Linux.
+  `bc-rust serve --lan` serves the UI to other devices on
   the local network after a one-time pairing.
 
 ## Installing
 
-Requirements: Rust (stable) with the `wasm32-unknown-unknown` target, `trunk`,
+On Linux. Requirements: Rust (stable) with the `wasm32-unknown-unknown` target, `trunk`,
 `wasm-bindgen`, `brotli`, `clang`, `pkgconf`, and the ALSA, OpenSSL and D-Bus
 development files. At runtime: a Chromium-family browser (Chromium, Google
 Chrome, Brave, Edge or Vivaldi) or Firefox for the app window, and optionally
@@ -65,6 +67,31 @@ bc-desktop
 On Arch Linux, `makepkg -si` in `packaging/` builds and installs a package
 (`bc-desktop`, the `bc-rust` command line tool and the icons). The command
 line tool is called `bc-rust` because `bc` is the GNU calculator.
+
+The release workflow (`.github/workflows/release.yml`) builds the macOS disk
+image and attaches it to the GitHub release of every `v*` tag; it can also be
+started by hand from the Actions tab.
+
+### macOS
+
+Download `bc-macos-arm64.dmg` from the latest GitHub release (Apple silicon,
+macOS 12 or later) and drag bc to Applications. The app is not notarized:
+allow the first launch under System Settings → Privacy & Security → Open
+Anyway. On macOS bc shows its UI in a native window (WebKit), so no other
+browser is needed. Closing the window keeps music playing; the dock icon
+brings it back and ⌘Q quits. Play/pause and next track are in the
+**Controls** menu.
+
+The command line tool is inside the app bundle:
+`/Applications/bc.app/Contents/MacOS/bc-rust`. `ffmpeg` and `bandcamp-dl`
+from Homebrew are found without changes to `PATH`.
+
+To build it yourself (Rust with the `wasm32-unknown-unknown` target, `trunk`,
+`brotli` and the Xcode command line tools, e.g. `brew install trunk brotli`):
+
+```sh
+./packaging/macos/build-app.sh  # → target/macos/bc.app and bc-macos-arm64.dmg
+```
 
 ## Using it
 
@@ -100,12 +127,13 @@ bc-rust import --from ~/.local/share/bcapp/library.db   # import the previous ap
 
 ### Configuration
 
-Data lives in `~/.local/share/bc-rust` (`library.db`, caches, backups).
-Environment variables override the defaults:
+Data lives in `~/.local/share/bc-rust` on Linux and in
+`~/Library/Application Support/bc-rust` on macOS (`library.db`, caches,
+backups). Environment variables override the defaults:
 
 | Variable | Default | |
 |---|---|---|
-| `BC_DATA_DIR` | `~/.local/share/bc-rust` | database, caches, backups |
+| `BC_DATA_DIR` | see above | database, caches, backups |
 | `BC_DOWNLOAD_DIR` | `$BC_DATA_DIR/downloads` | where downloads land |
 | `BC_HOST`, `BC_PORT` | `127.0.0.1`, `8420` | server address |
 | `BC_AUDIO` | (system default) | `null` runs without an audio device |
@@ -114,7 +142,7 @@ Environment variables override the defaults:
 | `BC_BANDCAMP_DL_BIN` | `bandcamp-dl` | the alternative downloader |
 | `BC_ESSENTIA_PYTHON` | — | a Python with essentia, for reference BPM/key |
 | `BC_HARVEST_RATE_PER_SEC` | `0.67` | Bandcamp request rate |
-| `BC_DESKTOP_BROWSER` | (first found) | browser for the app window, Chromium family or Firefox |
+| `BC_DESKTOP_BROWSER` | (first found) | Linux: browser for the app window, Chromium family or Firefox |
 
 Tempo and key come from bc's own analyzer. If `BC_ESSENTIA_PYTHON` points at a
 Python with essentia installed, new tracks use essentia's values instead and
@@ -131,7 +159,7 @@ A Cargo workspace of 23 crates in `crates/`:
 | Bandcamp & jobs | `bc-bandcamp`, `bc-jobs` |
 | Analysis & music | `bc-analysis`, `bc-waveform`, `bc-music`, `bc-recommend` |
 | Audio | `bc-dsp`, `bc-engine`, `bc-worklet` |
-| App | `bc-server` (axum, WebSocket hub, embedded UI), `bc-ui` (Leptos, WebAssembly), `bc-desktop` |
+| App | `bc-server` (axum, WebSocket hub, embedded UI), `bc-ui` (Leptos, WebAssembly), `bc-desktop` (browser window on Linux, WebKit window on macOS) |
 
 ```sh
 cargo test --workspace         # unit and integration tests
@@ -154,9 +182,12 @@ per area are in `docs/api/`; the `.bcw2` waveform format is described in
 - On a real library the native key matches essentia on about 93 % of tracks,
   but the tempo matches within 0.5 % on only about 82 % (93 % within 3 %). For
   essentia's tempo, see `BC_ESSENTIA_PYTHON` above.
-- WebKitGTK is not used for the desktop window (it was not reliable on Wayland
-  with NVIDIA drivers). In Firefox the window frame does not take the app's
-  colours the way a Chromium app window does.
+- WebKitGTK is not used for the desktop window on Linux (it was not reliable
+  on Wayland with NVIDIA drivers). In Firefox the window frame does not take
+  the app's colours the way a Chromium app window does.
+- The macOS app is signed ad hoc, not notarized, and built for Apple silicon
+  only. Because the signature changes with every build, the Keychain asks
+  again for access to the stored Bandcamp cookie after an update.
 
 ## License
 
