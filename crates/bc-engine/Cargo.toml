@@ -1,6 +1,6 @@
 [package]
 name = "bc-engine"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Native playback host: cpal output, decode workers, PlayerSession, MPRIS, offline render."
 
