@@ -180,6 +180,9 @@ pub fn WaveCanvas(
     #[prop(optional, into)] height: Option<f64>,
     /// Reports hover time (seconds) for tooltips.
     #[prop(optional, into)] on_hover: Option<Callback<Option<f64>>>,
+    /// Set to whether waveform data is loaded (false for streams and unanalysed tracks), so the
+    /// host can show a plain seek bar instead. Keeps its value while a new track's data loads.
+    #[prop(optional)] has_data: Option<RwSignal<bool>>,
 ) -> impl IntoView {
     let canvas = NodeRef::<leptos::html::Canvas>::new();
     let player = use_player();
@@ -234,6 +237,9 @@ pub fn WaveCanvas(
                         v.borrow_mut().set_data(None);
                     }
                 });
+                if let Some(h) = has_data {
+                    h.set(false);
+                }
                 dirty.set_value(true);
             }
             Some(id) => {
@@ -244,6 +250,9 @@ pub fn WaveCanvas(
                         return;
                     }
                     duration.set_value(w.as_ref().map(|w| w.duration_s()).unwrap_or(0.0));
+                    if let Some(h) = has_data {
+                        let _ = h.try_set(w.is_some());
+                    }
                     view.with_value(|v| {
                         if let Some(v) = v {
                             v.borrow_mut().set_data(w);

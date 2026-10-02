@@ -79,7 +79,7 @@ async fn main() {
     fp.bpm = bpm;
     let queue: Vec<QueueItem> = (1..=files.len() as i64).filter_map(|i| fp.item(i)).collect();
     let output = if null {
-        OutputKind::Null { sample_rate: 48_000, block: 512, speed: 1.0, capture: None }
+        OutputKind::Null { sample_rate: 48_000, block: 512, speed: 1.0, capture: None, cue: None }
     } else {
         OutputKind::Cpal(OutputTarget { device, cue_device: None, buffer_frames: buffer })
     };

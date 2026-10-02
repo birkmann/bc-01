@@ -5,7 +5,8 @@ use bc_types::jobs::{KIND_ANALYZE, KIND_DOWNLOAD};
 
 use crate::app::use_app;
 use crate::data::{use_jobs, ws_connected};
-use crate::ds::{BrandLockup, Button, SearchInput, ToastCentre, Variant, use_debounced};
+use crate::ds::{BrandLockup, Button, Icon, SearchInput, ToastCentre, Variant, use_debounced};
+use crate::history::{self, Dir};
 
 /// One status light: a dot and a small-caps label, with the detail in the tooltip.
 #[component]
@@ -14,6 +15,27 @@ fn Led(label: &'static str, #[prop(into)] state: Signal<&'static str>, #[prop(in
         <span class=move || format!("hb-led {}", state.get()) title=move || tip.get()>
             <i></i><b>{label}</b>
         </span>
+    }
+}
+
+/// Back / forward through the window's history, as a browser toolbar would (the app window
+/// has none). Alt+← / Alt+→ and the mouse's side buttons do the same natively.
+#[component]
+fn HistoryButton(dir: Dir) -> impl IntoView {
+    let (icon, verb, keys) = match dir {
+        Dir::Back => ("arrow-left", "Back", "Alt+\u{2190}"),
+        Dir::Forward => ("arrow-right", "Forward", "Alt+\u{2192}"),
+    };
+    let label = Memo::new(move |_| history::label(dir));
+    let title = move || match label.get() {
+        Some(l) if !l.is_empty() => format!("{verb} to {l} ({keys})"),
+        _ => format!("{verb} ({keys})"),
+    };
+    view! {
+        <button type="button" class="btn btn-ghost btn-icon btn-sm" aria-label=verb title=title
+            disabled=move || label.get().is_none() on:click=move |_| history::go(dir)>
+            <Icon name=icon />
+        </button>
     }
 }
 
@@ -103,6 +125,10 @@ pub fn TopBar() -> impl IntoView {
             <Button variant=Variant::Ghost icon="menu" title="Open navigation" class="only-mobile" on_click=move |_| app.nav_open.set(true) />
             <div class="hb-brand"><BrandLockup /></div>
             <span class="hb-div"></span>
+            <div class="hb-hist">
+                <HistoryButton dir=Dir::Back />
+                <HistoryButton dir=Dir::Forward />
+            </div>
             <div class="hb-leds">
                 <Led label="LIVE" state=live tip=live_tip />
                 <Led label="DL" state=busy(dl) tip=count_tip(dl, "download") />

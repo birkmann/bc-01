@@ -233,7 +233,7 @@ impl Deck {
         self.fade_in = 0.0;
     }
 
-    /// Glide the base rate to `to` over `secs` (the tempo glide back to 1.0).
+    /// Glide the base rate to `to` over `secs` on an S-curve (the tempo glide back to 1.0).
     pub fn glide_to(&mut self, to: f64, secs: f64) {
         if secs <= 0.0 || (self.rate_base - to).abs() < 1e-4 {
             self.rate_base = to;
@@ -396,7 +396,9 @@ impl Deck {
         if self.glide_dur > 0.0 {
             self.glide_t += dt;
             let p = (self.glide_t / self.glide_dur).min(1.0);
-            self.rate_base = self.glide_from + (self.glide_to - self.glide_from) * p;
+            // smoothstep: the tempo eases out of the matched rate and into its own, no corner either end
+            let e = p * p * (3.0 - 2.0 * p);
+            self.rate_base = self.glide_from + (self.glide_to - self.glide_from) * e;
             if p >= 1.0 {
                 self.glide_dur = 0.0;
             }

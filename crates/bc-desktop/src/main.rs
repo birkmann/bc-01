@@ -3,8 +3,10 @@
 //! What it does:
 //! * Runs `bc_server` in-process: library, jobs, analysis, and the native audio engine with MPRIS
 //!   media keys.
-//! * Shows the UI in a chromeless app window of an installed Chromium-family browser
-//!   (`--app=URL`, with its own profile dir and window class `bc`, so the dock shows the bc icon).
+//! * Shows the UI in a chromeless app window of an installed browser, with its own profile dir and
+//!   window class `bc` (so the dock shows the bc icon): a Chromium-family browser (`--app=URL`)
+//!   when there is one, else Firefox (or a fork) with a private profile whose `userChrome.css`
+//!   hides the tab strip and toolbars, else the default browser.
 //! * Is single-instance. Launching it again while it runs just opens another window on the running
 //!   server. `bc-desktop --quit` stops it.
 //! * Closing the window quits, unless music is playing; then it keeps playing in the background.
@@ -19,7 +21,8 @@
 //! * "Error 71" Wayland protocol errors with the defaults;
 //! * blank white windows under XWayland.
 //!
-//! Chromium renders the same UI reliably. Nothing in the UI needs a JS bridge: it talks HTTP/WS.
+//! Chromium and Firefox render the same UI reliably. Nothing in the UI needs a JS bridge: it talks
+//! HTTP/WS.
 
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -70,28 +73,50 @@ fn health_ok(url: &str) -> bool {
     false
 }
 
-fn find_browser() -> Option<PathBuf> {
-    if let Some(b) = std::env::var_os("BC_DESKTOP_BROWSER") {
-        return Some(PathBuf::from(b));
-    }
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    for name in ["google-chrome-stable", "chromium", "brave", "google-chrome", "brave-browser", "microsoft-edge-stable", "vivaldi-stable"] {
-        for dir in std::env::split_paths(&path) {
-            let p = dir.join(name);
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    None
+const CHROMIUM_NAMES: [&str; 7] =
+    ["google-chrome-stable", "chromium", "brave", "google-chrome", "brave-browser", "microsoft-edge-stable", "vivaldi-stable"];
+const FIREFOX_NAMES: [&str; 5] = ["firefox", "firefox-esr", "librewolf", "floorp", "waterfox"];
+
+/// The browser that hosts the app window.
+#[derive(Debug, Clone, PartialEq)]
+enum Browser {
+    /// Chromium family: a real app window (`--app=URL`).
+    Chromium(PathBuf),
+    /// Firefox or a fork: no app mode, so a private profile hides the browser chrome.
+    Firefox(PathBuf),
 }
 
-fn profile_dir() -> PathBuf {
+impl Browser {
+    /// `BC_DESKTOP_BROWSER` may name either kind; it is told apart by the binary's name.
+    fn from_path(p: PathBuf) -> Self {
+        let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if FIREFOX_NAMES.iter().any(|f| name.starts_with(f)) { Self::Firefox(p) } else { Self::Chromium(p) }
+    }
+}
+
+fn on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path).map(|dir| dir.join(name)).find(|p| p.is_file())
+}
+
+/// A Chromium-family browser when one is installed (the best app window), else Firefox.
+fn find_browser() -> Option<Browser> {
+    if let Some(b) = std::env::var_os("BC_DESKTOP_BROWSER") {
+        return Some(Browser::from_path(PathBuf::from(b)));
+    }
+    CHROMIUM_NAMES
+        .iter()
+        .find_map(|n| on_path(n))
+        .map(Browser::Chromium)
+        .or_else(|| FIREFOX_NAMES.iter().find_map(|n| on_path(n)).map(Browser::Firefox))
+}
+
+fn profile_dir(name: &str) -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_else(std::env::temp_dir);
-    base.join("bc-rust").join("window-profile")
+    base.join("bc-rust").join(name)
 }
 
 /// Turn off the browser's own chrome for this private profile: translate offers (the UI is
@@ -125,14 +150,72 @@ fn quiet_profile(profile: &std::path::Path) {
     let _ = std::fs::write(&path, prefs.to_string());
 }
 
+/// Firefox has no app mode. Its private profile gets prefs that keep it quiet (no first-run pages,
+/// default-browser checks, translation offers, password prompts or session-restore prompts; audio
+/// may start without a click, like Chromium's `--autoplay-policy`) and a `userChrome.css` that
+/// hides the tab strip and toolbars while the app is the only tab. A link opened in a new tab
+/// (Open on Bandcamp) brings them back until that tab is closed. Rewritten on every start:
+/// Firefox reads `user.js` at startup and never writes it.
+const FIREFOX_USER_JS: &str = r#"// Written by bc-desktop on every start; edits are overwritten.
+user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+user_pref("browser.tabs.inTitlebar", 0);
+user_pref("browser.toolbars.bookmarks.visibility", "never");
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
+user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+user_pref("browser.translations.automaticallyPopup", false);
+user_pref("signon.rememberSignons", false);
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("media.autoplay.default", 0);
+"#;
+
+const FIREFOX_USER_CHROME: &str = r#"/* Written by bc-desktop on every start; edits are overwritten. */
+#navigator-toolbox:not(:has(.tabbrowser-tab ~ .tabbrowser-tab)) :is(#TabsToolbar, #nav-bar, #PersonalToolbar) {
+  visibility: collapse !important;
+}
+"#;
+
+fn firefox_profile(profile: &std::path::Path) {
+    let _ = std::fs::create_dir_all(profile.join("chrome"));
+    let _ = std::fs::write(profile.join("user.js"), FIREFOX_USER_JS);
+    let _ = std::fs::write(profile.join("chrome").join("userChrome.css"), FIREFOX_USER_CHROME);
+}
+
 /// Open an app window on `url`. Returns the browser process when this call started one.
 fn open_window(url: &str) -> Option<Child> {
-    let Some(browser) = find_browser() else {
-        tracing::warn!("no Chromium-family browser found; opening the default browser");
-        let _ = Command::new("xdg-open").arg(url).spawn();
-        return None;
+    let mut cmd = match find_browser() {
+        None => {
+            tracing::warn!("no Chromium-family browser or Firefox found; opening the default browser");
+            let _ = Command::new("xdg-open").arg(url).spawn();
+            return None;
+        }
+        Some(Browser::Firefox(browser)) => {
+            let profile = profile_dir("window-profile-firefox");
+            firefox_profile(&profile);
+            let mut cmd = Command::new(browser);
+            // `--name` is also Firefox's remoting name: a second launch with the same profile and
+            // name opens a window in the running instance instead of failing, like Chromium does.
+            cmd.arg("--profile").arg(&profile).args(["--class", "bc", "--name", "bc", "--new-window", url]);
+            cmd
+        }
+        Some(Browser::Chromium(browser)) => chromium_cmd(browser, url),
     };
-    let profile = profile_dir();
+    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    match cmd.spawn() {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::error!("could not start the window: {e}");
+            None
+        }
+    }
+}
+
+fn chromium_cmd(browser: PathBuf, url: &str) -> Command {
+    let profile = profile_dir("window-profile");
     let _ = std::fs::create_dir_all(&profile);
     quiet_profile(&profile);
     let mut cmd = Command::new(browser);
@@ -148,14 +231,7 @@ fn open_window(url: &str) -> Option<Child> {
     if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var("BC_DESKTOP_WAYLAND").as_deref() != Ok("1") {
         cmd.arg("--ozone-platform=x11");
     }
-    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    match cmd.spawn() {
-        Ok(c) => Some(c),
-        Err(e) => {
-            tracing::error!("could not start the window: {e}");
-            None
-        }
-    }
+    cmd
 }
 
 struct App {
@@ -395,4 +471,30 @@ fn main() -> anyhow::Result<()> {
 fn tracing_subscriber_init() {
     // bc-server installs its own subscriber when run via `bc serve`; the desktop app only needs
     // warnings on stderr, which the default (no subscriber) drops. Keep it dependency-free.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_kind_follows_the_binary_name() {
+        assert_eq!(Browser::from_path("/usr/bin/firefox".into()), Browser::Firefox("/usr/bin/firefox".into()));
+        assert_eq!(Browser::from_path("/opt/librewolf/librewolf".into()), Browser::Firefox("/opt/librewolf/librewolf".into()));
+        assert_eq!(Browser::from_path("/usr/bin/firefox-developer-edition".into()), Browser::Firefox("/usr/bin/firefox-developer-edition".into()));
+        assert_eq!(Browser::from_path("/usr/bin/chromium".into()), Browser::Chromium("/usr/bin/chromium".into()));
+        assert_eq!(Browser::from_path("/usr/bin/brave".into()), Browser::Chromium("/usr/bin/brave".into()));
+    }
+
+    #[test]
+    fn firefox_profile_enables_user_chrome() {
+        let dir = std::env::temp_dir().join(format!("bc-desktop-ff-{}", std::process::id()));
+        firefox_profile(&dir);
+        let js = std::fs::read_to_string(dir.join("user.js")).unwrap();
+        assert!(js.contains(r#"user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);"#));
+        assert!(js.contains(r#"user_pref("media.autoplay.default", 0);"#));
+        let css = std::fs::read_to_string(dir.join("chrome/userChrome.css")).unwrap();
+        assert!(css.contains("#nav-bar"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -6,7 +6,6 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-authors = ["Rafael Birkmann"]
 repository = "https://github.com/birkmann/bc-01"
 rust-version = "1.85"
 

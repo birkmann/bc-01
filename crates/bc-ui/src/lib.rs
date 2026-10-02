@@ -5,6 +5,7 @@ pub mod api;
 pub mod app;
 pub mod data;
 pub mod ds;
+pub mod history;
 pub mod logic;
 pub mod nav;
 pub mod palette;

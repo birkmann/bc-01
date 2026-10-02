@@ -11,6 +11,7 @@ pub mod dedup;
 pub mod diskguard;
 pub mod library_port;
 pub mod native;
+pub mod owned;
 pub mod slug;
 pub mod verify;
 pub mod worker;
@@ -99,6 +100,9 @@ pub struct DownloadSpec {
     pub timeout: Duration,
     /// Download a /track/ URL as that single track.
     pub tracks_only: bool,
+    /// A Bandcamp format key ([`owned::FORMATS`]): a purchase comes from the owner's collection
+    /// in it (native downloader, cookie set). `None` = always the public stream.
+    pub format: Option<String>,
 }
 
 impl DownloadSpec {
@@ -110,6 +114,7 @@ impl DownloadSpec {
             full_album: true,
             timeout: Duration::from_secs(2700),
             tracks_only: false,
+            format: None,
         }
     }
 }

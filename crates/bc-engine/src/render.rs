@@ -197,13 +197,14 @@ fn blend_for(slot: &RenderSlot, overlap_s: f64) -> BlendSpec {
     BlendSpec {
         kind: slot.transition,
         length_s: overlap_s,
-        curve: if slot.transition == TransitionKind::Blend || slot.transition == TransitionKind::BassSwap { Curve::EqualPower } else { Curve::Linear },
+        curve: if matches!(slot.transition, TransitionKind::Blend | TransitionKind::BassSwap | TransitionKind::EqBlend) { Curve::EqualPower } else { Curve::Linear },
         incoming_start_s: 0.0,
         echo,
         sync: None,
         park_tail_s: if echo.is_some() { ECHO_TAIL_S } else { CUT_TAIL_S },
         quantise: Quantise::Off,
         phase_lock: false,
+        swap_s: None,
     }
 }
 

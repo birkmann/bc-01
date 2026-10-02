@@ -110,38 +110,102 @@ fn TopTags() -> impl IntoView {
     }
 }
 
+const STATS_METRIC_KEY: &str = "bc:sb-stats-metric:v1";
+const STATS_SIZES: [&str; 4] = ["off", "s", "m", "l"];
+
+/// Library stats in the sidebar footer, sized by `UiPrefs::sidebar_stats`. Small shows one
+/// figure at a time (click for the next), medium a compact grid, large labelled tiles.
+#[component]
+fn LibraryInfo(#[prop(into)] size: Signal<String>) -> impl IntoView {
+    let stats = use_query::<LibraryStats>(|| Some(QuerySpec::new("/library/stats", &["stats", "track"])));
+    let metric = RwSignal::new(crate::util::ls_get(STATS_METRIC_KEY).and_then(|v| v.parse::<usize>().ok()).unwrap_or(0));
+    Effect::new(move |_| crate::util::ls_set(STATS_METRIC_KEY, &metric.get().to_string()));
+    view! {
+        {move || {
+            let size = size.get();
+            let s = stats.data.get()?;
+            let disk = s.disk.clone().filter(|d| d.total_bytes > 0);
+            let used = disk.as_ref().map(|d| d.used_bytes as f64 / d.total_bytes as f64);
+            let tone = match used { Some(u) if u >= 0.9 => " danger", Some(u) if u >= 0.7 => " warn", _ => "" };
+            let disk_title = disk.as_ref().map(|d| format!("{} of {} used", format_bytes(d.used_bytes as f64), format_bytes(d.total_bytes as f64))).unwrap_or_default();
+            let meter = used.map(|u| view! {
+                <div class=format!("meter sbi-meter{tone}") role="meter" aria-label="Disk space used"
+                    aria-valuenow=(u * 100.0).round().to_string() aria-valuemin="0" aria-valuemax="100" title=disk_title.clone()>
+                    <i style=format!("width:{:.0}%", u * 100.0)></i></div>
+            });
+            let mut figures = vec![
+                (format_count(s.tracks), "tracks"),
+                (format_count(s.releases), "albums"),
+                (format_count(s.artists), "artists"),
+                (format_long_duration(s.total_duration_ms as f64), "playtime"),
+            ];
+            let free = disk.as_ref().map(|d| format_bytes(d.free_bytes as f64));
+            Some(match size.as_str() {
+                "s" => {
+                    if let Some(f) = &free {
+                        figures.push((f.clone(), "free"));
+                    }
+                    let n = figures.len();
+                    let i = metric.get() % n;
+                    let (value, label) = figures[i].clone();
+                    view! {
+                        <button type="button" class="sbi sbi-s sb-foot-text" title="Library info: click for the next figure"
+                            on:click=move |_| metric.set((i + 1) % n)>
+                            <span class="sbi-line"><b>{value}</b><span>{label}</span>
+                                <span class="sbi-dots" aria-hidden="true">
+                                    {(0..n).map(|k| view! { <i class:on=k == i></i> }).collect_view()}
+                                </span></span>
+                            {meter}
+                        </button>
+                    }.into_any()
+                }
+                "l" => view! {
+                    <div class="sbi sbi-l sb-foot-text">
+                        <div class="sbi-tiles">
+                            {figures.into_iter().map(|(v, l)| view! { <div><span>{l}</span><b>{v}</b></div> }).collect_view()}
+                        </div>
+                        {free.map(|f| view! {
+                            <div class="sbi-disk"><span>"disk"</span><span class="mono" title=disk_title.clone()>{f}" free"</span></div>
+                        })}
+                        {meter}
+                    </div>
+                }.into_any(),
+                _ => view! {
+                    <div class="sbi sbi-m sb-foot-text">
+                        <div class="stats">
+                            {figures.into_iter().map(|(v, l)| view! { <span>{l}</span><b>{v}</b> }).collect_view()}
+                        </div>
+                        {meter}
+                    </div>
+                }.into_any(),
+            })
+        }}
+    }
+}
+
 #[component]
 fn Footer() -> impl IntoView {
     let theme = use_theme();
     let app = use_app();
-    let stats = use_query::<LibraryStats>(|| Some(QuerySpec::new("/library/stats", &["stats", "track"])));
+    let prefs = crate::prefs::use_prefs().prefs;
+    let size = Signal::derive(move || prefs.with(|p| p.sidebar_stats.clone()));
+    let cycle = move |_| prefs.update(|p| {
+        let i = STATS_SIZES.iter().position(|s| *s == p.sidebar_stats).unwrap_or(0);
+        p.sidebar_stats = STATS_SIZES[(i + 1) % STATS_SIZES.len()].into();
+    });
     view! {
         <div class="sb-foot">
-            <div class="sb-foot-text">
-                {move || stats.data.get().map(|s| view! {
-                    <div class="stats">
-                        <span>"tracks"</span><b>{format_count(s.tracks)}</b>
-                        <span>"albums"</span><b>{format_count(s.releases)}</b>
-                        <span>"artists"</span><b>{format_count(s.artists)}</b>
-                        <span>"playtime"</span><b>{format_long_duration(s.total_duration_ms as f64)}</b>
-                    </div>
-                    {s.disk.clone().filter(|d| d.total_bytes > 0).map(|d| {
-                        let used = d.used_bytes as f64 / d.total_bytes as f64;
-                        let tone = if used >= 0.9 { " danger" } else if used >= 0.7 { " warn" } else { "" };
-                        view! {
-                            <div class="sb-foot-row"><span>"Disk"</span><span class="mono">{format_bytes(d.free_bytes as f64)}" free"</span></div>
-                            <div class=format!("meter{tone}") role="meter" aria-label="Disk space used"
-                                aria-valuenow=(used * 100.0).round().to_string() aria-valuemin="0" aria-valuemax="100"
-                                title=format!("{} of {} used", format_bytes(d.used_bytes as f64), format_bytes(d.total_bytes as f64))>
-                                <i style=format!("width:{:.0}%", used * 100.0)></i></div>
-                        }
-                    })}
-                })}
-            </div>
+            <Show when=move || size.with(|s| s != "off")>
+                <LibraryInfo size=size />
+            </Show>
             <div class="sb-foot-row">
                 <Button variant=Variant::Ghost size=crate::ds::Size::Sm
                     icon=dyn_icon(move || if theme.store.get().mode == bc_types::theme::Mode::Dark { "sun" } else { "moon" })
                     title="Toggle light / dark" on_click=move |_| theme.toggle_mode() />
+                <span class="spacer"></span>
+                <Button variant=Variant::Ghost size=crate::ds::Size::Sm icon="info" class="sbi-toggle"
+                    pressed=Signal::derive(move || size.with(|s| s != "off"))
+                    title="Library info: hidden / S / M / L" on_click=cycle />
                 <Button variant=Variant::Ghost size=crate::ds::Size::Sm icon=dyn_icon(move || if app.nav_collapsed.get() { "chevron-right" } else { "panel-left" })
                     title="Collapse sidebar" on_click=move |_| app.nav_collapsed.update(|c| *c = !*c) />
             </div>

@@ -48,13 +48,19 @@ pub struct UiPrefs {
     /// Tint tag chips with a stable per-tag hue (sidebar tags, tag cloud).
     #[serde(default)]
     pub tag_colors: bool,
+    /// Library-stats widget in the sidebar footer: "off" (default) | "s" | "m" | "l".
+    #[serde(default = "default_sidebar_stats")]
+    pub sidebar_stats: String,
 }
 fn default_player_wave() -> String {
     "bars".into()
 }
+fn default_sidebar_stats() -> String {
+    "off".into()
+}
 impl Default for UiPrefs {
     fn default() -> Self {
-        Self { waveform_style: "rgb".into(), player_wave_style: default_player_wave(), album_art_accent: false, reduce_motion: false, row_waveforms: false, tag_colors: false }
+        Self { waveform_style: "rgb".into(), player_wave_style: default_player_wave(), album_art_accent: false, reduce_motion: false, row_waveforms: false, tag_colors: false, sidebar_stats: default_sidebar_stats() }
     }
 }
 
@@ -66,5 +72,6 @@ mod tests {
         let p: UiPrefs = serde_json::from_str(r#"{"waveform_style":"mono"}"#).unwrap();
         assert_eq!(p.player_wave_style, "bars");
         assert_eq!(p.waveform_style, "mono");
+        assert_eq!(p.sidebar_stats, "off");
     }
 }

@@ -1,7 +1,7 @@
-//! Settings > Downloads and Bandcamp: disk guard, cookie (write-only), fans and
+//! Settings > Downloads and Bandcamp: download format, disk guard, cookie (write-only), fans and
 //! label resolution.
 use bc_types::bandcamp::{CookieRequest, FanOut, IdentityStatus, LabelResolveStatus};
-use bc_types::jobs::{DiskIn, DiskOut};
+use bc_types::jobs::{DiskIn, DiskOut, DownloadFormatIn, DownloadFormatOut};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -9,15 +9,69 @@ use super::common::{Notice, SysCard, qh};
 use super::logic::{bytes_to_gb_text, gb_to_bytes, parse_gb};
 use crate::api;
 use crate::data::{QuerySpec, use_query, use_topic};
-use crate::ds::{Badge, Button, Icon, Meter, Size, Skeleton, StatusBadge, Tone, Variant, confirm, toast_err, toast_ok};
+use crate::ds::{Badge, Button, Icon, Meter, Select, SelectOption, Size, Skeleton, StatusBadge, Tone, Variant, confirm, toast_err, toast_ok};
 use crate::logic::format::{format_bytes, format_count};
 
 #[component]
 pub fn BandcampSection() -> impl IntoView {
     view! {
+        <DownloadFormat />
         <DiskGuard />
         <Cookie />
         <Fans />
+    }
+}
+
+const STREAM: &str = "stream";
+
+#[component]
+fn DownloadFormat() -> impl IntoView {
+    let q = qh(use_query::<DownloadFormatOut>(|| Some(QuerySpec::new("/downloads/format", &["identity"]))));
+    let choice = RwSignal::new(STREAM.to_string());
+    Effect::new(move |_| {
+        if let Some(d) = q.data.get() {
+            choice.set(d.format.clone().unwrap_or_else(|| STREAM.into()));
+        }
+    });
+    let options = Signal::derive(move || {
+        let mut v = vec![SelectOption::new(STREAM, "Public stream (MP3 128)")];
+        if let Some(d) = q.data.get() {
+            v.extend(d.formats.iter().map(|f| SelectOption::new(f.key.clone(), f.label.clone())));
+        }
+        v
+    });
+    let dirty = Memo::new(move |_| q.data.get().is_some_and(|d| d.format.clone().unwrap_or_else(|| STREAM.into()) != choice.get()));
+    let busy = RwSignal::new(false);
+    let save = move |_| {
+        let c = choice.get_untracked();
+        let body = DownloadFormatIn { format: (c != STREAM).then_some(c) };
+        busy.set(true);
+        spawn_local(async move {
+            match api::put::<_, DownloadFormatOut>("/downloads/format", &body).await {
+                Ok(d) => {
+                    crate::data::cache::patch::<DownloadFormatOut>("/downloads/format", |x| *x = d);
+                    toast_ok("Download format saved");
+                }
+                Err(e) => toast_err(&e.message()),
+            }
+            busy.set(false);
+        });
+    };
+    view! {
+        <SysCard title="Download quality" icon="download"
+            hint="Releases you bought are downloaded from your Bandcamp collection in this format (or the best one Bandcamp offers for them). Anything you have not bought, and every download made with bandcamp-dl, is the public stream.">
+            <Show when=move || q.data.get().is_none()><Skeleton height="40px" /></Show>
+            <Show when=move || q.data.get().is_some()>
+                <div class="row gap wrap disk-form">
+                    <label>"Download purchases as"</label>
+                    <Select options=options value=choice aria_label="Download format" />
+                    <Button variant=Variant::Primary busy=busy disabled=Signal::derive(move || !dirty.get()) on_click=save>"Save"</Button>
+                </div>
+                <Show when=move || q.data.get().is_some_and(|d| d.format.is_some() && !d.cookie)>
+                    <p class="sys-hint">"Paste your Bandcamp cookie below: without it bc cannot see what you bought, so downloads stay on the public stream."</p>
+                </Show>
+            </Show>
+        </SysCard>
     }
 }
 

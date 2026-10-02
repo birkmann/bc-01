@@ -34,6 +34,7 @@ pub fn icon_markup(name: &str) -> &'static str {
         "chevron-left" => r#"<path d="M15 6l-6 6 6 6"/>"#,
         "chevron-right" => r#"<path d="M9 6l6 6-6 6"/>"#,
         "arrow-left" => r#"<path d="M19 12H5M11 6l-6 6 6 6"/>"#,
+        "arrow-right" => r#"<path d="M5 12h14M13 6l6 6-6 6"/>"#,
         "arrow-up" => r#"<path d="M12 19V5M6 11l6-6 6 6"/>"#,
         "arrow-down" => r#"<path d="M12 5v14M6 13l6 6 6-6"/>"#,
         "more" => r#"<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>"#,

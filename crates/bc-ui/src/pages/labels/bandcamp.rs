@@ -341,10 +341,14 @@ pub fn FollowButton(kind: Kind, name: String, url: String) -> impl IntoView {
 #[component]
 pub fn CatalogDownloadButton(url: String, #[prop(into)] missing: Signal<usize>, #[prop(into)] exact: Signal<bool>) -> impl IntoView {
     let busy = RwSignal::new(false);
+    // Releases this press put in the download queue; pressing again would only queue duplicates.
+    let queued = RwSignal::new(None::<i64>);
     let nothing_left = move || exact.get() && missing.get() == 0;
     let label = move || {
         let m = missing.get();
-        if nothing_left() {
+        if let Some(n) = queued.get() {
+            format!("{} queued", format_count(n))
+        } else if nothing_left() {
             "All in your library".to_string()
         } else if exact.get() {
             format!("Download {} missing", format_count(m as i64))
@@ -362,6 +366,7 @@ pub fn CatalogDownloadButton(url: String, #[prop(into)] missing: Signal<usize>, 
             let _ = busy.try_set(false);
             match r {
                 Ok(r) if r.queued > 0 => {
+                    let _ = queued.try_set(Some(r.queued));
                     let mut t = format!("Queued {}", lg::count_of(r.queued, "release"));
                     if r.skipped_in_library > 0 {
                         t.push_str(&format!(", skipped {} already in library", format_count(r.skipped_in_library)));
@@ -374,7 +379,8 @@ pub fn CatalogDownloadButton(url: String, #[prop(into)] missing: Signal<usize>, 
         });
     };
     view! {
-        <Button variant=Variant::Primary icon="download" busy=busy disabled=Signal::derive(nothing_left) on_click=run
+        <Button variant=Variant::Primary icon=crate::ds::dyn_icon(move || if queued.get().is_some() { "check" } else { "download" })
+            busy=busy disabled=Signal::derive(move || nothing_left() || queued.get().is_some()) on_click=run
             title="Queue everything from this catalogue that you do not already have">
             <span class="hide-sm">{label}</span>
         </Button>

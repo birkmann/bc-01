@@ -28,13 +28,16 @@ written in Rust and replaces an earlier Python/React version of bc.
   bodies are checked for errors because Bandcamp returns them with HTTP 200.
 - **Downloads.** A job queue stored in SQLite that resumes after a crash. Each
   file is written to `.part`, tagged, and then renamed, so an interrupted
-  download does not leave a partial file. `bandcamp-dl` can be used instead of
-  the built-in downloader. The queue pauses when disk space runs low.
+  download does not leave a partial file. Releases you bought come from your
+  collection in the format you pick (FLAC, MP3 320, WAV, ...); everything else
+  is Bandcamp's public stream. `bandcamp-dl` can be used instead of the
+  built-in downloader. The queue pauses when disk space runs low.
 - **Analysis.** One decode pass per track: tempo, beats, downbeats and
   phrases, Camelot key, energy, EBU R128 loudness with true peak, and a
   three-band waveform at about 172 points per second on an absolute dB scale.
 - **Player.** Audio engine on cpal with gapless playback, EQ, filter, echo,
-  limiter, key lock and five transition types. Queue, history, shuffle and
+  limiter, key lock and five transition types. An optional second output
+  device pre-listens on headphones while the main output keeps playing. Queue, history, shuffle and
   auto-fill. MPRIS media keys and a tray icon. The same DSP code runs in the
   browser as an AudioWorklet, so a phone can play through its own speaker.
 - **DJ sets.** Automix orders a pool of tracks by key and tempo compatibility
@@ -43,7 +46,7 @@ written in Rust and replaces an earlier Python/React version of bc.
   set clock. Sets can be rendered to WAV or MP3.
 - **Recommendations.** Next up, similar tracks and taste, computed locally.
 - **Desktop and phone.** `bc-desktop` runs the server and opens the UI in a
-  Chromium app window. `bc-rust serve --lan` serves the UI to other devices on
+  Chromium or Firefox app window. `bc-rust serve --lan` serves the UI to other devices on
   the local network after a one-time pairing.
 
 ## Installing
@@ -51,8 +54,8 @@ written in Rust and replaces an earlier Python/React version of bc.
 Requirements: Rust (stable) with the `wasm32-unknown-unknown` target, `trunk`,
 `wasm-bindgen`, `brotli`, `clang`, `pkgconf`, and the ALSA, OpenSSL and D-Bus
 development files. At runtime: a Chromium-family browser (Chromium, Google
-Chrome, Brave, Edge or Vivaldi) for the app window, and optionally `ffmpeg`
-(MP3 set renders, formats bc cannot decode itself) and `bandcamp-dl`.
+Chrome, Brave, Edge or Vivaldi) or Firefox for the app window, and optionally
+`ffmpeg` (MP3 set renders, formats bc cannot decode itself) and `bandcamp-dl`.
 
 ```sh
 ./scripts/install.sh            # builds the UI and the app, installs into ~/.local
@@ -70,10 +73,14 @@ line tool is called `bc-rust` because `bc` is the GNU calculator.
 2. For collections, wishlists and the feed, paste your Bandcamp cookie under
    **Settings → Bandcamp**. It is stored with 0600 permissions or in the
    system keyring, is never logged, and is only sent to `*.bandcamp.com`.
+   With the cookie set, pick a **Download quality** there: releases you
+   bought are then downloaded from your collection in that format.
 3. Browse **Explore, Feed and Fans**; queue what you want under
    **Downloads**. Finished downloads are added to the library automatically.
 4. Double-click any track to play it. **DJ Sets → New set** starts a set:
-   add tracks, press **Automix**, then fine-tune in **Arrange**.
+   add tracks, press **Automix**, then fine-tune in **Arrange**. To pre-listen
+   on headphones, choose a **Cue / headphones** device under
+   **Settings → Audio**.
 
 Keyboard (while not typing): <kbd>Space</kbd> play/pause, <kbd>←</kbd>/<kbd>→</kbd>
 seek, <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next, <kbd>/</kbd>
@@ -107,6 +114,7 @@ Environment variables override the defaults:
 | `BC_BANDCAMP_DL_BIN` | `bandcamp-dl` | the alternative downloader |
 | `BC_ESSENTIA_PYTHON` | — | a Python with essentia, for reference BPM/key |
 | `BC_HARVEST_RATE_PER_SEC` | `0.67` | Bandcamp request rate |
+| `BC_DESKTOP_BROWSER` | (first found) | browser for the app window, Chromium family or Firefox |
 
 Tempo and key come from bc's own analyzer. If `BC_ESSENTIA_PYTHON` points at a
 Python with essentia installed, new tracks use essentia's values instead and
@@ -139,17 +147,20 @@ per area are in `docs/api/`; the `.bcw2` waveform format is described in
 
 ## Known limitations
 
-- Downloads in owned quality (FLAC/320 from your purchases) are not built yet.
-- The native BPM/key analyzer passes the synthetic accuracy gate but is less
-  accurate than essentia on real libraries; see `BC_ESSENTIA_PYTHON` above.
-- The desktop window needs a Chromium-family browser: WebKitGTK was not
-  reliable on Wayland with NVIDIA drivers.
-- Only one audio output device is used; a separate headphone cue device is
-  untested.
+- Purchase-quality downloads need the Bandcamp cookie and the built-in
+  downloader. A track bought on its own is only found when it is queued with
+  **Tracks only**; otherwise it is widened to its album and comes from the
+  stream.
+- On a real library the native key matches essentia on about 93 % of tracks,
+  but the tempo matches within 0.5 % on only about 82 % (93 % within 3 %). For
+  essentia's tempo, see `BC_ESSENTIA_PYTHON` above.
+- WebKitGTK is not used for the desktop window (it was not reliable on Wayland
+  with NVIDIA drivers). In Firefox the window frame does not take the app's
+  colours the way a Chromium app window does.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Copyright (C) 2026 Rafael Birkmann.
+MIT, see [LICENSE](LICENSE). Copyright (C) 2026 The bc-01 contributors.
 
 The bundled Inter and JetBrains Mono fonts are under the SIL Open Font License
 (`crates/bc-ui/assets/fonts/`).

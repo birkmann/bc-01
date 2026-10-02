@@ -18,6 +18,10 @@
 //! `--embed-genres` does), a comment holding the release URL, and an APIC
 //! front-cover (`image/jpeg`, description `Cover`). The cover is embedded only;
 //! no `cover.jpg` is left in the album folder (bandcamp-dl removes it too).
+//!
+//! With a format set (`DownloadSpec::format`) and a cookie, a release the cookie's owner bought
+//! comes from their collection in that format instead ([`super::owned`]); anything else still
+//! comes from the stream, and the outcome says why.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -34,6 +38,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::bcdl::is_downloadable;
+use super::owned::{self, Layout, Purchases};
 use super::slug::{self, TrackMeta};
 use super::{DownloadSpec, Downloader, Outcome, OutcomeKind, Progress, ProgressFn};
 use crate::error::HarvestError;
@@ -49,14 +54,23 @@ const NONE_STREAMABLE_DETAIL: &str = "None of this release is publicly streamabl
 pub struct NativeDownloader {
     client: BandcampClient,
     template: String,
+    purchases: Purchases,
 }
 
 impl NativeDownloader {
     /// `client` is the shared client (pages through its token bucket, audio
     /// through `client.cdn_client()`); `template` the default layout.
     pub fn new(client: BandcampClient, template: impl Into<String>) -> Self {
-        Self { client, template: template.into() }
+        Self { client, template: template.into(), purchases: Purchases::default() }
     }
+}
+
+/// How the owned-quality attempt ended.
+enum OwnedRun {
+    /// It ran: this is the item's outcome (success or a real failure).
+    Done(Outcome),
+    /// It does not apply (not a purchase, no cookie, nothing offered yet): use the stream.
+    Skip(String),
 }
 
 /// A failure while fetching one track.
@@ -178,12 +192,129 @@ impl NativeDownloader {
             Ok(r) => r,
             Err(e) => return outcome_for_fetch_error(&e),
         };
+        let Some(format) = spec.format.as_deref() else {
+            return self.run_stream(spec, template, &release, progress, state).await;
+        };
+        let why = match self.run_owned(spec, template, format, &release, &mut *progress, state).await {
+            OwnedRun::Done(o) => return o,
+            OwnedRun::Skip(why) => why,
+        };
+        info!("native: {} not downloaded in {format}: {why}", spec.url);
+        let mut o = self.run_stream(spec, template, &release, progress, state).await;
+        if o.ok() {
+            o.detail = format!("{} {} was not used ({why}), so this is the public stream.", o.detail, owned::label_of(format));
+        }
+        o
+    }
+
+    /// The purchase in `format` (or the best format offered), unpacked into the stream layout.
+    async fn run_owned(
+        &self,
+        spec: &DownloadSpec,
+        template: &str,
+        format: &str,
+        release: &HarvestedRelease,
+        progress: ProgressFn<'_>,
+        state: &Mutex<State>,
+    ) -> OwnedRun {
+        if !self.client.has_cookie() {
+            return OwnedRun::Skip("no Bandcamp cookie is set".into());
+        }
+        let link = match self.purchases.link(&self.client, &release.url).await {
+            Ok(Some(l)) => l,
+            Ok(None) => return OwnedRun::Skip("not in your collection".into()),
+            Err(e) => return OwnedRun::Skip(format!("your collection could not be read: {e}")),
+        };
+        let resolved = match owned::resolve(&self.client, &link, format).await {
+            Ok(r) => r,
+            Err(e) => return OwnedRun::Skip(e.to_string()),
+        };
+        let layout = match Layout::new(release, template, &spec.base_dir) {
+            Ok(l) => l,
+            Err(e) => return OwnedRun::Done(outcome(OutcomeKind::Crash, false, format!("Refusing to write outside the download directory: {e}"))),
+        };
+        if let Err(e) = tokio::fs::create_dir_all(&spec.base_dir).await {
+            return OwnedRun::Done(finish_err(state, release, TrackError::Io(e.to_string())));
+        }
+        purge_partials(&spec.base_dir);
+        let total = release.tracks.len() as u32;
+        let label = owned::label_of(&resolved.format);
+        let mut emit = |phase: &str, fraction: f64| {
+            progress(Progress {
+                track_index: 1,
+                track_total: total,
+                phase: phase.to_string(),
+                track_name: format!("{} ({label})", release.title),
+                fraction,
+            })
+        };
+        emit("Downloading", 0.0);
+        let archive = spec.base_dir.join(".owned-download.part");
+        state.lock().current_part = Some(archive.clone());
+        if let Err(e) = self.fetch_track(&resolved.url, &archive, |f| emit("Downloading", f * 0.95)).await {
+            let _ = tokio::fs::remove_file(&archive).await;
+            state.lock().current_part = None;
+            warn!("native: owned download of {} failed: {e:?}", spec.url);
+            return OwnedRun::Done(finish_err(state, release, e));
+        }
+        emit("Encoding", 0.95);
+        let (a, fmt) = (archive.clone(), resolved.format.clone());
+        let unpacked = tokio::task::spawn_blocking(move || owned::unpack(&a, &fmt, &layout, existing_is_complete)).await;
+        let _ = tokio::fs::remove_file(&archive).await;
+        let unpacked = match unpacked {
+            Ok(Ok(u)) => u,
+            Ok(Err(e)) => {
+                state.lock().current_part = None;
+                return OwnedRun::Done(finish_err(state, release, TrackError::Io(format!("unpacking the download failed: {e}"))));
+            }
+            Err(e) => {
+                state.lock().current_part = None;
+                return OwnedRun::Done(finish_err(state, release, TrackError::Io(format!("unpack task failed: {e}"))));
+            }
+        };
+        let (new, present) = {
+            let mut st = state.lock();
+            st.current_part = None;
+            st.new_files.extend(unpacked.new_files.iter().cloned());
+            st.present += unpacked.present;
+            (st.new_files.clone(), st.finished())
+        };
+        emit("Finished", 1.0);
+        let mut o = Outcome {
+            tracks_expected: Some(total),
+            availability: Some(release.availability()),
+            tracks_finished: present,
+            new_files: new,
+            ..outcome(OutcomeKind::Ok, false, "")
+        };
+        if o.new_files.is_empty() && unpacked.present == 0 {
+            o.kind = OutcomeKind::NoOutput;
+            o.detail = format!("The {label} download held no audio files.");
+        } else if o.new_files.is_empty() {
+            o.kind = OutcomeKind::AlreadyHave;
+            o.detail = format!("Already downloaded: {} file(s) were already present and complete.", unpacked.present);
+        } else {
+            o.detail = format!("Downloaded {} file(s) in {label} from your collection.", o.new_files.len());
+        }
+        info!("native: {} -> {:?} ({label})", spec.url, o.kind);
+        OwnedRun::Done(o)
+    }
+
+    /// The release's public streams, one MP3 per streamable track.
+    async fn run_stream(
+        &self,
+        spec: &DownloadSpec,
+        template: &str,
+        release: &HarvestedRelease,
+        progress: ProgressFn<'_>,
+        state: &Mutex<State>,
+    ) -> Outcome {
         let total_tracks = release.tracks.len() as u32;
 
         let mut plan = Vec::new();
         for (i, t) in release.tracks.iter().enumerate() {
             let Some(stream_url) = t.stream_url.clone().filter(|u| !u.trim().is_empty()) else { continue };
-            let meta = track_meta(&release, t);
+            let meta = track_meta(release, t);
             let rel = {
                 let mut p = slug::expand_template(template, &meta).into_os_string();
                 p.push(".mp3");
@@ -236,12 +367,12 @@ impl NativeDownloader {
             }
             if let Some(dir) = p.dest.parent() {
                 if let Err(e) = tokio::fs::create_dir_all(dir).await {
-                    return finish_err(state, &release, TrackError::Io(e.to_string()));
+                    return finish_err(state, release, TrackError::Io(e.to_string()));
                 }
             }
             // A final file that exists but is unreadable is replaced (atomic rename).
             if art.is_none() {
-                art = Some(self.fetch_art(&release).await.map(Arc::new));
+                art = Some(self.fetch_art(release).await.map(Arc::new));
             }
             let cover = art.clone().flatten();
 
@@ -252,7 +383,7 @@ impl NativeDownloader {
                 .fetch_track(&p.stream_url, &part, |frac| emit(&mut *progress, "Downloading", frac * 0.999))
                 .await;
             let res = match res {
-                Ok(()) => finalize(&release, p, total_tracks, &part, cover).await,
+                Ok(()) => finalize(release, p, total_tracks, &part, cover).await,
                 Err(e) => Err(e),
             };
             match res {
@@ -268,7 +399,7 @@ impl NativeDownloader {
                     let _ = tokio::fs::remove_file(&part).await;
                     state.lock().current_part = None;
                     warn!("native: track {} of {} failed: {e:?}", p.index, spec.url);
-                    return finish_err(state, &release, e);
+                    return finish_err(state, release, e);
                 }
             }
         }
@@ -391,7 +522,7 @@ fn outcome_for_fetch_error(e: &HarvestError) -> Outcome {
     }
 }
 
-fn track_meta(release: &HarvestedRelease, t: &HarvestedTrack) -> TrackMeta {
+pub(super) fn track_meta(release: &HarvestedRelease, t: &HarvestedTrack) -> TrackMeta {
     let artist = t.artist.clone().filter(|a| !a.is_empty());
     let title = slug::strip_artist_prefix(&t.title, artist.as_deref());
     // bandcamp-dl: `str(track['track_num'])`, "None" (-> "Single") when absent.

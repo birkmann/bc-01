@@ -108,7 +108,9 @@
 .xg-selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; margin-bottom: 14px; border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-surface-2); }
 
 /* ---- hero (band + release) ---------------------------------------------- */
-.xg-back { display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 12px; font-size: var(--text-xs); color: var(--color-ink-muted); }
+.xg-back { display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 12px; max-width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-xs); color: var(--color-ink-muted); cursor: pointer; }
+.xg-back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xg-back .icon { flex: none; }
 .xg-back:hover { color: var(--color-accent); }
 .xg-hero { position: relative; display: flex; align-items: flex-start; gap: 22px; padding: 4px 0 6px; }
 .xg-hero-face { width: 112px; height: 112px; flex: none; border-radius: 50%; object-fit: cover; background: var(--color-surface-3); border: 1px solid var(--color-line); }

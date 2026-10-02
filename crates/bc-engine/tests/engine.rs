@@ -50,7 +50,7 @@ fn rig(files: Vec<PathBuf>, bpm: Option<f64>, speed: f64) -> Rig {
     let mut fp = FilePorts::new(files);
     fp.bpm = bpm;
     let cfg = SessionConfig {
-        output: OutputKind::Null { sample_rate: SR, block: 256, speed, capture: Some(capture.clone()) },
+        output: OutputKind::Null { sample_rate: SR, block: 256, speed, capture: Some(capture.clone()), cue: None },
         ..Default::default()
     };
     Rig { session: Session::new(fp.into_ports(), Box::new(NullPublisher), cfg), capture }

@@ -163,6 +163,11 @@ impl DownloadHandler {
         spec.template = template;
         spec.timeout = Duration::from_secs(self.deps.cfg.download_timeout_s);
         spec.tracks_only = params.tracks_only;
+        // Read per item, so a changed preference applies to the next download.
+        spec.format = {
+            let db = self.deps.db.clone();
+            tokio::task::spawn_blocking(move || crate::download::owned::read_format(&db)).await.ok().flatten().map(str::to_string)
+        };
 
         // Progress arrives on the downloader's task; persist/publish it (<= 4/s) off a forwarder.
         let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel::<Progress>();

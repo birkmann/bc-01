@@ -44,6 +44,74 @@ pub fn PlayTime(#[prop(optional)] remaining: bool) -> impl IntoView {
     view! { <span class="mono pt">{move || text.get()}</span> }
 }
 
+/// Plain seek bar for tracks without a waveform (streams, files not analysed yet). The rAF loop
+/// writes position and buffer straight into CSS variables, so playback costs no reactive updates.
+#[component]
+fn SeekBar(hover: RwSignal<Option<f64>>) -> impl IntoView {
+    let player = use_player();
+    let st = player.state;
+    let el = NodeRef::<leptos::html::Div>::new();
+    let alive = StoredValue::new(true);
+    on_cleanup(move || alive.set_value(false));
+    Effect::new(move |started: Option<bool>| {
+        if started.is_some() {
+            return true;
+        }
+        let last = std::cell::Cell::new((-1i64, -1i64));
+        crate::util::raf_loop(move |_| {
+            if !alive.try_get_value().unwrap_or(false) {
+                return false;
+            }
+            let Some(e) = el.get_untracked() else { return true };
+            let (pos, dur, buf) = player.clock.with_untracked(|c| (position_now(c, player.clock_at.get_untracked()), c.duration_s, c.buffered_s));
+            // hundredths of a percent: enough for a smooth bar, few style writes
+            let pct = |s: f64| if dur > 0.0 { (s / dur * 10_000.0).clamp(0.0, 10_000.0).round() as i64 } else { 0 };
+            let now = (pct(pos), pct(buf.max(pos)));
+            if now != last.get() {
+                last.set(now);
+                let style = web_sys::HtmlElement::style(&e);
+                let _ = style.set_property("--p", &format!("{:.2}%", now.0 as f64 / 100.0));
+                let _ = style.set_property("--b", &format!("{:.2}%", now.1 as f64 / 100.0));
+            }
+            true
+        });
+        true
+    });
+    let time_at = move |ev: &web_sys::PointerEvent| -> Option<f64> {
+        let e = el.get_untracked()?;
+        let r = e.get_bounding_client_rect();
+        let dur = player.clock.with_untracked(|c| c.duration_s);
+        (r.width() > 0.0 && dur > 0.0).then(|| ((ev.client_x() as f64 - r.left()) / r.width()).clamp(0.0, 1.0) * dur)
+    };
+    let dragging = StoredValue::new(false);
+    let mix_out = move || {
+        let dur = player.clock.with_untracked(|c| c.duration_s);
+        st.with(|s| s.mix_out_override_s.or(s.mix_out_s).filter(|_| s.mix))
+            .filter(|t| dur > 0.0 && *t > 0.0)
+            .map(|t| view! { <i class="sb-mark" style=format!("left:{:.3}%", (t / dur * 100.0).clamp(0.0, 100.0))></i> })
+    };
+    view! {
+        <div class="pl-scrub" node_ref=el
+            on:pointerdown=move |ev: web_sys::PointerEvent| {
+                if let Some(e) = el.get_untracked() { let _ = e.set_pointer_capture(ev.pointer_id()); }
+                dragging.set_value(true);
+                if let Some(t) = time_at(&ev) { player.seek(t); }
+            }
+            on:pointermove=move |ev: web_sys::PointerEvent| {
+                let t = time_at(&ev);
+                hover.set(t);
+                if dragging.get_value() { if let Some(t) = t { player.seek(t); } }
+            }
+            on:pointerup=move |_| dragging.set_value(false)
+            on:pointercancel=move |_| dragging.set_value(false)
+            on:pointerleave=move |_| hover.set(None)>
+            <div class="sb-track"><i class="sb-buf"></i><i class="sb-played"></i></div>
+            {mix_out}
+            <i class="sb-knob"></i>
+        </div>
+    }
+}
+
 fn output_menu(player: super::store::PlayerCtx) -> Vec<MenuEntry> {
     let st = player.state.get_untracked();
     let target = player.target.get_untracked();
@@ -106,7 +174,7 @@ pub fn TransitionStrip() -> impl IntoView {
     view! {
         <Show when=move || t.with(|t| t.is_some())>
             <div class="trans-strip" role="status" aria-label="Transition">
-                <span class="status info"><Icon name="mix" />{move || t.with(|t| t.as_ref().map(|t| format!("{:?}", t.kind).to_lowercase()).unwrap_or_default())}</span>
+                <span class="status info"><Icon name="mix" />{move || t.with(|t| t.as_ref().map(|t| t.kind.label()).unwrap_or_default())}</span>
                 <div class="meter grow"><i style=move || format!("width:{:.1}%", progress.get() * 100.0)></i></div>
                 {move || t.with(|t| t.as_ref().and_then(|t| t.phase.clone())).map(|p| view! { <span class="badge">{format!("{p:?}").to_lowercase()}</span> })}
                 <Button size=Size::Sm variant=Variant::Ghost title="Slower" on_click=move |_| player.cmd(PlayerCommand::Retime { factor: 2.0 })>"Slower"</Button>
@@ -141,19 +209,22 @@ pub fn PlayerBar() -> impl IntoView {
         }
     });
     let hover = RwSignal::new(None::<f64>);
+    let has_wave = RwSignal::new(false);
     let prefs = crate::prefs::use_prefs();
+    let mixing = Signal::derive(move || st.with(|s| s.mix));
     let markers = Signal::derive(move || {
         let mut m = Markers::default();
         if let Some(info) = music.get() {
             m.grid = info.grid.clone();
             m.cues = info.cues.clone();
             m.chapter_ticks = info.grid.is_some();
-            if let Some(mp) = &info.mix_points {
+            // mix-in / mix-out only mean something while DJ mix is on
+            if let Some(mp) = info.mix_points.as_ref().filter(|_| mixing.get()) {
                 m.mix_in_s = Some(mp.cue_in_ms as f64 / 1000.0);
             }
         }
         m.hover_s = hover.get();
-        m.mix_out_s = st.with(|s| s.mix_out_override_s.or(s.mix_out_s));
+        m.mix_out_s = st.with(|s| s.mix_out_override_s.or(s.mix_out_s)).filter(|_| mixing.get());
         // Bars: a dimmed "unbuffered" tail makes the whole bar look faded while the decoder is still
         // catching up (seek / fresh track), so only the spectral style shows it.
         if prefs.prefs.with(|p| p.player_wave_style == "rgb") {
@@ -226,9 +297,10 @@ pub fn PlayerBar() -> impl IntoView {
                     </div>
                     <div class="pl-seek" on:click=on_shift_mixout>
                         <PlayTime />
-                        <div class="pl-wave" title="Click to seek. Shift+click sets the mix-out point.">
+                        <div class="pl-wave" class:no-wave=move || !has_wave.get() title="Click to seek. Shift+click sets the mix-out point.">
                             <WaveCanvas track_id=track_id level=WaveLevel::Overview mode=ViewMode::Overview playhead=Playhead::Player
-                                style=waveform_style normalise=true markers=markers on_seek=seek_overview on_hover=Callback::new(move |h| hover.set(h)) />
+                                style=waveform_style normalise=true markers=markers on_seek=seek_overview on_hover=Callback::new(move |h| hover.set(h)) has_data=has_wave />
+                            <Show when=move || !has_wave.get()><SeekBar hover=hover /></Show>
                             {move || hover.get().map(|t| {
                                 let dur = player.clock.with_untracked(|c| c.duration_s).max(1.0);
                                 view! { <span class="pl-hover mono" style=format!("left:{:.3}%", (t / dur * 100.0).clamp(0.0, 100.0))>{format_duration_s(t)}</span> }

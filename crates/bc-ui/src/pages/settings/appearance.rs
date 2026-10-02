@@ -617,6 +617,12 @@ fn DisplayPrefs(prefs: PrefsHandle) -> impl IntoView {
                 get={|p: &UiPrefs| p.tag_colors} set={|p: &mut UiPrefs, v: bool| p.tag_colors = v} />
             <PrefSwitch prefs=prefs label="Waveforms in track rows" desc="Show a small waveform in track lists (uses more GPU)."
                 get={|p: &UiPrefs| p.row_waveforms} set={|p: &mut UiPrefs, v: bool| p.row_waveforms = v} />
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Library info in sidebar"</div>
+                    <div class="desc faint">"Track, album and artist counts, playtime and free disk space under the navigation. Also cycled with the info button there."</div></div>
+                <SegmentedControl options=vec![("off", "Off"), ("s", "S"), ("m", "M"), ("l", "L")]
+                    value=crate::prefs::bind_pref(|p| p.sidebar_stats.clone(), |p, v| p.sidebar_stats = v) />
+            </div>
         </SysCard>
     }
 }

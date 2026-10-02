@@ -103,6 +103,7 @@ fn spec(kind: TransitionKind, echo: bool) -> BlendSpec {
         park_tail_s: if echo { ECHO_TAIL_S } else { 0.2 },
         quantise: Quantise::Off,
         phase_lock: false,
+        swap_s: None,
     }
 }
 
@@ -198,6 +199,93 @@ fn cut_is_a_declicked_hard_switch() {
     assert!(amp(&x, T0 + 0.05, 0.2, 1000.0) < 0.004);
     assert!((amp(&x, T0 + 0.05, 0.2, 1500.0) - 0.2).abs() < 0.01);
     check_golden("cut", fnv(&out), GOLDEN_CUT);
+}
+
+#[test]
+fn eq_blend_brings_the_incoming_in_bass_cut_then_swaps_and_lets_the_outgoing_go() {
+    // 4 s blend, no grid: the swap sits in the middle (T0 + 2)
+    let out = scenario(TransitionKind::EqBlend, false, &[60.0, 1000.0], &[70.0, 1500.0]);
+    let x = left(&out);
+    // the incoming's fader comes up with its bass held back
+    assert!(amp(&x, T0 + 0.3, 0.5, 70.0) < 0.015, "B low before the swap: {}", amp(&x, T0 + 0.3, 0.5, 70.0));
+    // both play in full before the swap: B's mids are in, A's bass still carries the groove
+    let bm = amp(&x, T0 + 1.2, 0.5, 1500.0);
+    assert!((bm - 0.2).abs() < 0.02, "B mids before the swap {bm}");
+    assert!(amp(&x, T0 + 1.2, 0.5, 60.0) > 0.17, "A low before the swap");
+    assert!(amp(&x, T0 + 1.2, 0.5, 1000.0) > 0.12, "A mids before the swap");
+    // after the swap: only one bassline, the incoming's
+    assert!(amp(&x, T0 + 2.4, 0.5, 60.0) < 0.015, "A low after the swap: {}", amp(&x, T0 + 2.4, 0.5, 60.0));
+    assert!(amp(&x, T0 + 2.4, 0.5, 70.0) > 0.17, "B low after the swap");
+    // and at the end the incoming alone, at unity
+    assert!(amp(&x, T0 + 4.3, 0.4, 1000.0) < 0.005);
+    assert!((amp(&x, T0 + 4.3, 0.4, 1500.0) - 0.2).abs() < 0.01);
+    assert!((amp(&x, T0 + 4.3, 0.4, 70.0) - 0.2).abs() < 0.015);
+    // no clicks anywhere along the way
+    let max_step = x.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+    assert!(max_step < 0.1, "click {max_step}");
+}
+
+#[test]
+fn slowing_a_blend_down_keeps_the_swap_still_to_come() {
+    let mut rig = OfflineRig::new(SR, StretchQuality::Fast);
+    rig.cue(0, tones(&[60.0, 1000.0], 0.2, 16.0), 0, 0, 1.0, false, 1.0, None);
+    rig.send(Cmd::Play { deck: 0 });
+    let mut out = vec![];
+    rig.render(2 * SR as usize, &mut out);
+    rig.cue(1, tones(&[70.0, 1500.0], 0.2, 16.0), 0, 0, 1.0, false, 1.0, None);
+    rig.render((0.05 * SR as f64) as usize, &mut out);
+    rig.send(Cmd::StartTransition { out: 0, inc: 1, spec: spec(TransitionKind::EqBlend, false) });
+    rig.render(SR as usize / 2, &mut out);
+    // half a second in, twice as slow: the 3.5 s left become 7, the swap moves from T0 + 2 to T0 + 3.5
+    rig.send(Cmd::Retime { remaining_s: 7.0 });
+    rig.render(9 * SR as usize, &mut out);
+    let x = left(&out);
+    assert!(amp(&x, T0 + 2.6, 0.5, 60.0) > 0.17, "A low still in after the old swap time");
+    assert!(amp(&x, T0 + 2.6, 0.5, 70.0) < 0.015, "B low still held back: {}", amp(&x, T0 + 2.6, 0.5, 70.0));
+    assert!(amp(&x, T0 + 4.0, 0.5, 60.0) < 0.015, "A low gone after the new swap");
+    assert!(amp(&x, T0 + 4.0, 0.5, 70.0) > 0.17, "B low in after the new swap");
+    let ended = rig.events.iter().find_map(|e| if let Event::TransitionRetimed { end_t } = e { Some(*end_t) } else { None }).unwrap();
+    assert!((ended - (T0 + 7.5)).abs() < 0.05, "retimed end {ended}");
+}
+
+#[test]
+fn a_phrase_that_comes_too_late_falls_back_to_the_bar() {
+    // A: 12 s at 120 BPM, beats from 0.10 s. At 2.3 s the next phrase (8.1 s) leaves no room
+    // for a 4 s blend before A ends, the next bar (4.1 s) does.
+    let ga = BeatGrid { origin_s: 0.10, period_s: 0.5, confidence: 1.0, downbeat_beat: 0 };
+    let mut rig = OfflineRig::new(SR, StretchQuality::Fast);
+    rig.cue(0, clicks(120.0, 0.10, 12.0), 0, 0, 1.0, false, 1.0, Some(ga));
+    rig.send(Cmd::Play { deck: 0 });
+    let mut out = vec![];
+    rig.render((2.3 * SR as f64) as usize, &mut out);
+    rig.cue(1, clicks(120.0, 0.0, 12.0), 0, 0, 1.0, false, 1.0, None);
+    rig.render(2048, &mut out);
+    let spec = BlendSpec { quantise: Quantise::Phrase, ..spec(TransitionKind::EqBlend, false) };
+    rig.send(Cmd::StartTransition { out: 0, inc: 1, spec });
+    rig.render(4 * SR as usize, &mut out);
+    let started = rig.events.iter().find_map(|e| if let Event::TransitionStarted { start_frame, .. } = e { Some(*start_frame) } else { None }).expect("started");
+    let t = started as f64 / SR as f64;
+    assert!((t - 4.1).abs() < 2.0 / SR as f64, "started at {t}, not on the bar at 4.1");
+}
+
+#[test]
+fn the_match_follows_an_outgoing_that_moved_since_the_plan() {
+    let mut rig = OfflineRig::new(SR, StretchQuality::Fast);
+    rig.cue(0, tones(&[1000.0], 0.2, 10.0), 0, 0, 1.0, false, 1.0, None);
+    rig.send(Cmd::Play { deck: 0 });
+    let mut out = vec![];
+    rig.render(SR as usize, &mut out);
+    rig.cue(1, tones(&[1500.0], 0.2, 10.0), 0, 0, 1.0, false, 1.0, None);
+    // planned against A at 1.0 with B at 1.01; A has since moved to 1.02
+    rig.send(Cmd::SetRate { deck: 0, rate: 1.02, keylock: false, glide_s: 0.0 });
+    let mut spec = spec(TransitionKind::EqBlend, false).with_sync(1.01);
+    if let Some(s) = spec.sync.as_mut() {
+        s.out_rate = 1.0;
+    }
+    rig.send(Cmd::StartTransition { out: 0, inc: 1, spec });
+    rig.render(SR as usize / 2, &mut out);
+    let r = rig.shared.load().decks[1].rate;
+    assert!((r - 1.01 * 1.02).abs() < 1e-6, "incoming rate {r}");
 }
 
 #[test]

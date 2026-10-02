@@ -2,7 +2,8 @@
 //!
 //! 1. envelope preparation (local-mean subtraction, std normalisation);
 //! 2. windowed autocorrelation tempogram averaged over the track, with a log-normal EDM prior
-//!    (octave candidates kept);
+//!    (octave candidates kept); a linear re-ranker then chooses among the metrical relatives
+//!    (1/2, 2/3, 3/4, 1, 4/3, 3/2, 2) of the best lag;
 //! 3. Ellis dynamic-programming beat tracking at the estimated period, re-run at the refined one;
 //! 4. robust linear regression of beat times -> constant grid (sub-0.1 % tempo precision on a
 //!    click track), or a segmented variable grid when a block-wise drift test fails.
@@ -12,9 +13,14 @@ use realfft::RealFftPlanner;
 
 pub const BPM_MIN: f64 = 55.0;
 pub const BPM_MAX: f64 = 215.0;
-/// EDM prior (log-normal in the octave domain).
-pub const PRIOR_BPM: f64 = 124.0;
+/// EDM prior (log-normal in the octave domain). Centre and comb weights were grid-searched
+/// against the essentia reference on 1500 library tracks (`tempo-eval`); the score is flat
+/// within +-0.2 pt for centres 126-134 BPM.
+pub const PRIOR_BPM: f64 = 130.0;
 pub const PRIOR_SIGMA_OCT: f64 = 0.85;
+/// Weights of the autocorrelation at twice and four times the lag in the candidate score.
+pub const COMB2: f64 = 1.0;
+pub const COMB4: f64 = 0.0;
 pub const TIGHTNESS: f32 = 100.0;
 
 #[derive(Debug, Clone)]
@@ -26,6 +32,31 @@ pub struct TempoEstimate {
     pub strength: f64,
     /// Alternatives incl. octave variants, best first (BPM).
     pub candidates: Vec<f64>,
+    /// The metrical relatives the re-ranker chose among (tooling: `tempo-feats`).
+    pub hypotheses: Vec<Hypothesis>,
+}
+
+/// BPM ratios to the best-scoring lag that the re-ranker may switch to.
+pub const RELATIVES: [f64; 7] = [0.5, 2.0 / 3.0, 0.75, 1.0, 4.0 / 3.0, 1.5, 2.0];
+/// Re-ranker features: autocorrelation at 1, 2, 3, 4, 1/2, 3/2 and 1/3 of the lag; log2 tempo
+/// over the prior centre and its square; relative comb score; one-hot of the relative.
+pub const N_HYP_FEAT: usize = 16;
+/// Linear re-ranker weights (softmax over a track's hypotheses), fitted on library tracks
+/// against the essentia reference.
+const RERANK_W: [f64; N_HYP_FEAT] = [
+    -0.4845, 4.3808, -1.1044, 2.5547, 0.9422, 0.7186, -1.0699, -1.0193, -3.4163, 2.5671, -0.3424, -0.7995, 1.2286, -1.0570, -1.5399,
+    -0.0214,
+];
+
+/// One tempo hypothesis.
+#[derive(Debug, Clone)]
+pub struct Hypothesis {
+    pub bpm: f64,
+    /// fractional frames
+    pub lag: f64,
+    /// BPM ratio to the best-scoring lag
+    pub ratio: f64,
+    pub feat: [f64; N_HYP_FEAT],
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +106,7 @@ fn tune() -> &'static (f64, f64, f64, f64, f64) {
     static T: std::sync::OnceLock<(f64, f64, f64, f64, f64)> = std::sync::OnceLock::new();
     T.get_or_init(|| {
         let g = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
-        (g("BC_TEMPO_PRIOR", PRIOR_BPM), g("BC_TEMPO_SIGMA", PRIOR_SIGMA_OCT), g("BC_TEMPO_COMB2", 0.5), g("BC_TEMPO_COMB4", 0.25), g("BC_TEMPO_HALF", 0.0))
+        (g("BC_TEMPO_PRIOR", PRIOR_BPM), g("BC_TEMPO_SIGMA", PRIOR_SIGMA_OCT), g("BC_TEMPO_COMB2", COMB2), g("BC_TEMPO_COMB4", COMB4), g("BC_TEMPO_HALF", 0.0))
     })
 }
 
@@ -191,7 +222,42 @@ pub fn estimate_tempo(env: &[f32], fps: f32) -> Option<TempoEstimate> {
         let d = a - 2.0 * b + c;
         if d.abs() < 1e-12 { lag } else { lag + (0.5 * (a - c) / d).clamp(-1.0, 1.0) }
     };
-    let lag = refine(best.0);
+    let lag0 = refine(best.0);
+    // metrical relatives of the best lag, each at its own autocorrelation peak (+-2 %)
+    let local_peak = |l: f64| -> f64 {
+        let (lo, hi) = ((l * 0.98).floor() as usize, (l * 1.02).ceil() as usize);
+        let i = (lo..=hi).max_by(|a, b| at(*a as f64).total_cmp(&at(*b as f64))).unwrap_or(l as usize);
+        refine(i as f64)
+    };
+    let s0 = score(lag0).max(1e-9);
+    let mut hyps: Vec<Hypothesis> = Vec::with_capacity(RELATIVES.len());
+    for (ri, r) in RELATIVES.iter().enumerate() {
+        let l = if *r == 1.0 { lag0 } else { local_peak(lag0 / r) };
+        if *r != 1.0 && !(lag_min as f64..=lag_max as f64).contains(&l) {
+            continue;
+        }
+        let x = (60.0 * fps / l / PRIOR_BPM).log2();
+        let mut f = [0.0f64; N_HYP_FEAT];
+        f[..7].copy_from_slice(&[at(l), at(2.0 * l), at(3.0 * l), at(4.0 * l), at(0.5 * l), at(1.5 * l), at(l / 3.0)]);
+        f[7] = x;
+        f[8] = x * x;
+        f[9] = (score(l) - s0) / s0;
+        // one-hot of the relative (the best lag itself is the reference)
+        let oh = [0, 1, 2, usize::MAX, 3, 4, 5][ri];
+        if oh != usize::MAX {
+            f[10 + oh] = 1.0;
+        }
+        hyps.push(Hypothesis { bpm: 60.0 * fps / l, lag: l, ratio: *r, feat: f });
+    }
+    // re-rank (ties keep the best-scoring lag)
+    let mut pick = (lag0, f64::NEG_INFINITY);
+    for h in &hyps {
+        let s: f64 = h.feat.iter().zip(RERANK_W.iter()).map(|(a, b)| a * b).sum();
+        if s > pick.1 || (s == pick.1 && h.ratio == 1.0) {
+            pick = (h.lag, s);
+        }
+    }
+    let lag = pick.0;
     let bpm = 60.0 * fps / lag;
     // candidates: strongest distinct peaks, then octave variants
     peaks.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -209,7 +275,7 @@ pub fn estimate_tempo(env: &[f32], fps: f32) -> Option<TempoEstimate> {
         }
     }
     let strength = at(lag).clamp(0.0, 1.0);
-    Some(TempoEstimate { bpm, lag, strength, candidates: cands })
+    Some(TempoEstimate { bpm, lag, strength, candidates: cands, hypotheses: hyps })
 }
 
 /// Ellis DP beat tracker. `period` in frames. Returns beat frame indices (ascending).
@@ -446,18 +512,11 @@ pub fn analyze(env_raw: &[f32], fps: f32, frame_time_ms: impl Fn(f64) -> f64) ->
         let o = origin + k0 * p;
         (GridKind::Constant, vec![TempoSegment { origin_ms: o, bpm: 60_000.0 / p, beats: None }], 60_000.0 / p)
     } else {
-        let segs = fit_variable(&beats_ms, period_ms);
-        let bpm = {
-            let mut tot = 0.0;
-            let mut w = 0.0;
-            for s in &segs {
-                let b = s.beats.unwrap_or(16) as f64;
-                tot += b * s.bpm;
-                w += b;
-            }
-            if w > 0.0 { tot / w } else { 60_000.0 / p }
-        };
-        (GridKind::Variable, segs, bpm)
+        // The headline tempo stays the robust whole-track fit: on real tracks a variable grid
+        // mostly means breakdowns or loose tracking rather than a tempo change, and the
+        // beat-weighted mean of short segments drifted off the true tempo (bench: +1.1 pt
+        // within 0.5 % vs the segment mean).
+        (GridKind::Variable, fit_variable(&beats_ms, period_ms), 60_000.0 / p)
     };
     // confidence: autocorrelation strength x beat consistency
     let consistency = (inlier).clamp(0.0, 1.0);

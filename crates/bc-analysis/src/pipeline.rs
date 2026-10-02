@@ -1,7 +1,8 @@
 //! The single streaming pass: decode once, feed loudness, waveform, onset, chroma and energy in
 //! lock-step, then run the whole-track tempo/beat/downbeat/phrase/key/mix-point stages on the
 //! (small) accumulated feature series. Memory is flat in track length: the only things that grow
-//! are ~170 onset frames/s of f32 features and the 6-byte detail waveform points.
+//! are ~170 onset frames/s of f32 features, one 12-bin key HPCP per ~0.19 s chroma frame and the
+//! 6-byte detail waveform points.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use crate::decode::{DecodeError, Sink, StreamInfo, decode_stream};
 use crate::dsp::{Decimator, decimation_for};
 use crate::energy::{EnergyCalibration, EnergyRaw, raw_from};
 use crate::features::{ChromaExtractor, FrameSeries, ONSET_FFT, ONSET_HOP, OnsetExtractor, RmsMeter};
-use crate::key::{Feat, KeyProfiles, KeyResult, classify, features};
+use crate::key::{Feat, KeyProfiles, KeyResult, classify, classify_hpcp, features};
 use crate::rhythm::{find_downbeats, find_phrases};
 use crate::tempo::{self, TempoResult};
 
@@ -315,8 +316,19 @@ pub fn analyze_file(path: &Path, opts: &AnalyzeOptions) -> Result<TrackAnalysis,
             let dur_s = duration_ms as f64 / 1000.0;
             let st = bc_music::beatgrid::legacy_excerpt_start_s(dur_s);
             let w = c.window(st, st + bc_music::beatgrid::LEGACY_EXCERPT_S);
-            // [whole track x4 channels, excerpt x4 channels]
-            vec![c.bass.to_vec(), c.mid.to_vec(), c.harm.to_vec(), c.spec.to_vec(), w[0].to_vec(), w[1].to_vec(), w[2].to_vec(), w[3].to_vec()]
+            let e = c.ess_window(st, st + bc_music::beatgrid::LEGACY_EXCERPT_S);
+            // [whole track x4 channels, excerpt x4 channels, excerpt essentia-style HPCP]
+            vec![
+                c.bass.to_vec(),
+                c.mid.to_vec(),
+                c.harm.to_vec(),
+                c.spec.to_vec(),
+                w[0].to_vec(),
+                w[1].to_vec(),
+                w[2].to_vec(),
+                w[3].to_vec(),
+                e.to_vec(),
+            ]
         })
     } else {
         None
@@ -326,7 +338,10 @@ pub fn analyze_file(path: &Path, opts: &AnalyzeOptions) -> Result<TrackAnalysis,
         let st = bc_music::beatgrid::legacy_excerpt_start_s(dur_s);
         let w = c.window(st, st + bc_music::beatgrid::LEGACY_EXCERPT_S);
         let feat = features([&w[0], &w[1], &w[2], &w[3]])?;
-        Some(KeyOut { result: classify(&feat, &opts.profiles), feat })
+        // essentia-style HPCP + edma profiles first; the fitted profiles only when it is empty
+        let h = c.ess_window(st, st + bc_music::beatgrid::LEGACY_EXCERPT_S);
+        let result = classify_hpcp(&h).unwrap_or_else(|| classify(&feat, &opts.profiles));
+        Some(KeyOut { result, feat })
     });
 
     let energy_raw = raw_from(&pass.momentary, &series.onset, &series.centroid);

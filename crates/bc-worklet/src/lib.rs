@@ -59,6 +59,7 @@ fn kind_of(k: u32) -> TransitionKind {
         2 => TransitionKind::Filter,
         3 => TransitionKind::EchoOut,
         4 => TransitionKind::Cut,
+        5 => TransitionKind::EqBlend,
         _ => TransitionKind::Blend,
     }
 }
@@ -247,7 +248,7 @@ pub extern "C" fn bcw_strip(h: *mut Host, low: f64, mid: f64, high: f64, filter:
     send(h, Cmd::SetStrip { low, mid, high, filter, echo_send })
 }
 
-/// Blend `inc` into `out`. `kind`: 0 blend, 1 bass swap, 2 filter, 3 echo-out, 4 cut.
+/// Blend `inc` into `out`. `kind`: 0 blend, 1 bass swap, 2 filter, 3 echo-out, 4 cut, 5 EQ blend.
 /// `quantise`: 0 off, 1 beat, 2 bar, 3 phrase. `sync_rate <= 0`: no tempo match.
 /// `echo_send <= 0`: no echo.
 #[unsafe(no_mangle)]
@@ -274,10 +275,13 @@ pub extern "C" fn bcw_transition(
             from_bpm,
             to_bpm,
             hold: false,
+            out_rate: 0.0,
+            glide_s: bc_dsp::beatmatch::GLIDE_BACK_S,
         }),
         park_tail_s,
         quantise: quantise_of(quantise),
         phase_lock: phase_lock != 0,
+        swap_s: None,
     };
     send(h, Cmd::StartTransition { out: out as u8, inc: inc as u8, spec })
 }

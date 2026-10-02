@@ -2,6 +2,10 @@
 //!
 //!   bc-analysis-tool bench   --db <legacy.db> [--n 2000] [--skip 0] [--seed 1] [--threads N]
 //!                            [--profiles profiles.json] [--out rows.jsonl] [--store <new library.db>]
+//!                            [--env-dir DIR]   (dump onset envelopes + chromas for the tools below)
+//!   bc-analysis-tool tempo-eval  --rows rows.jsonl --env-dir DIR [--excerpt] [--show] [--dump out.tsv]
+//!   bc-analysis-tool tempo-feats --rows rows.jsonl --env-dir DIR --out hyps.tsv
+//!                            (tempo re-ranker training data, see `tempo::RERANK_W`)
 //!   bc-analysis-tool fit-key-profiles --train rows.jsonl [--test rows2.jsonl] [--out profiles.json] [--emit-rust]
 //!   bc-analysis-tool calibrate-energy --rows rows.jsonl [--out cal.json] [--emit-rust]
 //!
@@ -95,7 +99,7 @@ fn main() {
             let mut ok_oct = 0usize;
             let mut ok_strict = 0usize;
             let mut n = 0usize;
-            let out: Vec<(f64, f64, f64)> = {
+            let out: Vec<(i64, f64, f64, f64, String)> = {
                 use rayon::prelude::*;
                 rows.par_iter()
                     .filter_map(|r| {
@@ -109,12 +113,25 @@ fn main() {
                         }
                         let ft = |f: f64| f * 1000.0 / fps as f64;
                         let t = bc_analysis::tempo::analyze(&env, fps, ft)?;
-                        Some((t.bpm, r.ref_bpm?, t.confidence))
+                        let extra = format!(
+                            "{:?}\t{:.3}\t{}",
+                            t.grid.kind,
+                            t.inlier_ratio,
+                            t.candidates.iter().map(|c| format!("{c:.2}")).collect::<Vec<_>>().join(",")
+                        );
+                        Some((r.track_id, t.bpm, r.ref_bpm?, t.confidence, extra))
                     })
                     .collect()
             };
+            if let Some(p) = a.get("dump") {
+                // per-track TSV: id, ours, ref, confidence, grid kind, inlier ratio, candidates
+                let mut f = std::fs::File::create(p).expect("dump");
+                for (id, b, rb, c, extra) in &out {
+                    writeln!(f, "{id}\t{b:.3}\t{rb:.3}\t{c:.3}\t{extra}").unwrap();
+                }
+            }
             let mut worst = Vec::new();
-            for (b, rb, c) in &out {
+            for (_, b, rb, c, _) in &out {
                 n += 1;
                 if bench::octave_err(*b, *rb) < 0.005 {
                     ok_oct += 1;
@@ -130,6 +147,35 @@ fn main() {
                 for w in worst {
                     println!("  ours {:.2} ref {:.2} conf {:.2} ratio {:.3}", w.0, w.1, w.2, w.0 / w.1);
                 }
+            }
+        }
+        "tempo-feats" => {
+            // re-ranker training data: one TSV line per (track, hypothesis):
+            // track id, reference BPM, hypothesis BPM, ratio, features...
+            let rows = read_rows(a.get("rows").expect("--rows"));
+            let dir = PathBuf::from(a.get("env-dir").expect("--env-dir"));
+            let lines: Vec<String> = {
+                use rayon::prelude::*;
+                rows.par_iter()
+                    .filter_map(|r| {
+                        let (env, fps) = bench::load_env(&dir.join(format!("{}.env", r.track_id)))?;
+                        let est = bc_analysis::tempo::estimate_tempo(&bc_analysis::tempo::prepare_envelope(&env, fps), fps)?;
+                        let rb = r.ref_bpm?;
+                        let ls: Vec<String> = est
+                            .hypotheses
+                            .iter()
+                            .map(|h| {
+                                let f: Vec<String> = h.feat.iter().map(|v| format!("{v:.5}")).collect();
+                                format!("{}\t{rb:.3}\t{:.3}\t{:.4}\t{}", r.track_id, h.bpm, h.ratio, f.join("\t"))
+                            })
+                            .collect();
+                        Some(ls.join("\n"))
+                    })
+                    .collect()
+            };
+            let mut f = std::fs::File::create(a.get("out").expect("--out")).expect("out");
+            for l in lines {
+                writeln!(f, "{l}").unwrap();
             }
         }
         "fit-key-profiles" => {

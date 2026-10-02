@@ -1,7 +1,14 @@
-//! Key detection: HPCP-style chroma channels scored against fitted key profiles.
+//! Key detection.
 //!
-//! Scoring is rotation-equivariant: `score(k, mode) = bias[mode] + sum_c sum_i w[mode][c][(i-k)%12] f_c[i]`
-//! with `f_c = ln(chroma_c / sum(chroma_c) + 1e-3)`, a multinomial logistic regression over the 24 keys
+//! Primary path ([`classify_hpcp`]): a port of essentia's `KeyExtractor` with the `edma`
+//! profiles over the essentia-style HPCP of [`crate::features::EssHpcp`], which reproduces the
+//! imported essentia keys on ~93 % of a real library (the fitted-profile model below reached
+//! ~38 %).
+//!
+//! Fallback (no HPCP peaks) and tooling: HPCP-style chroma channels scored against fitted key
+//! profiles. Scoring is rotation-equivariant:
+//! `score(k, mode) = bias[mode] + sum_c sum_i w[mode][c][(i-k)%12] f_c[i]` with
+//! `f_c = ln(chroma_c / sum(chroma_c) + 1e-3)`, a multinomial logistic regression over the 24 keys
 //! fitted on the user's library using the imported essentia keys as labels (`fit_profiles`,
 //! exposed as `bc analyze --fit-key-profiles`). A default profile ships for fresh installs
 //! (`KeyProfiles::default()`, see `key_defaults.rs`).
@@ -75,8 +82,9 @@ pub fn features(c36: [&[f64; BINS]; K]) -> Option<Feat> {
 
 /// Features from stored 36-bin vectors (tooling).
 pub fn features_from_vecs(v: &[Vec<f64>]) -> Option<Feat> {
-    // 8 vectors = [whole x4, excerpt x4]: the excerpt is what production uses
-    let v = if v.len() == 2 * K { &v[K..] } else { v };
+    // 8 (or 9) vectors = [whole x4, excerpt x4 (, excerpt HPCP)]: the excerpt is what
+    // production uses
+    let v = if v.len() >= 2 * K { &v[K..2 * K] } else { v };
     if v.len() != K || v.iter().any(|x| x.len() != BINS) {
         return None;
     }
@@ -92,9 +100,57 @@ pub struct KeyResult {
     pub pitch_class: u8,
     pub minor: bool,
     pub camelot: &'static str,
-    /// Softmax probability of the winner (0..1).
+    /// 0..1: the winner's profile correlation ([`classify_hpcp`], like essentia's `strength`) or
+    /// its softmax probability ([`classify`]).
     pub strength: f64,
     pub scores: [f32; 24],
+}
+
+/// essentia `edma` profiles (tonic first), fitted on electronic dance music.
+const EDMA_MAJOR: [f64; 12] = [1.00, 0.29, 0.50, 0.40, 0.60, 0.56, 0.32, 0.80, 0.31, 0.45, 0.42, 0.39];
+const EDMA_MINOR: [f64; 12] = [1.00, 0.31, 0.44, 0.58, 0.33, 0.49, 0.29, 0.78, 0.43, 0.29, 0.53, 0.32];
+/// essentia `Key` `pcpThreshold`: bins below this fraction of the peak are zeroed.
+const HPCP_GATE: f64 = 0.2;
+
+/// essentia `Key` (profile `edma`, no polyphony) on a summed HPCP (index 0 = C): peak-normalise,
+/// zero the bins below 0.2, Pearson-correlate with every rotation of the major and minor
+/// profiles; the best minor wins ties with the best major. `None` for an empty HPCP.
+pub fn classify_hpcp(h: &[f64; 12]) -> Option<KeyResult> {
+    let max = h.iter().cloned().fold(0.0f64, f64::max);
+    if max <= 0.0 || !max.is_finite() {
+        return None;
+    }
+    let p: Vec<f64> = h.iter().map(|v| if v / max < HPCP_GATE { 0.0 } else { v / max }).collect();
+    let centre = |v: &[f64]| -> (Vec<f64>, f64) {
+        let m = v.iter().sum::<f64>() / 12.0;
+        let c: Vec<f64> = v.iter().map(|x| x - m).collect();
+        let sd = c.iter().map(|x| x * x).sum::<f64>().sqrt();
+        (c, sd)
+    };
+    let (pc, sp) = centre(&p);
+    if sp <= 0.0 {
+        return None;
+    }
+    let mut sc = [0.0f32; 24];
+    for (mode, prof) in [EDMA_MAJOR, EDMA_MINOR].iter().enumerate() {
+        let (q, sq) = centre(prof);
+        for k in 0..12 {
+            let r: f64 = (0..12).map(|i| pc[i] * q[(i + 12 - k) % 12]).sum();
+            sc[mode * 12 + k] = (r / (sp * sq)) as f32;
+        }
+    }
+    let best = |r: std::ops::Range<usize>| r.max_by(|a, b| sc[*a].total_cmp(&sc[*b]).then(b.cmp(a))).unwrap_or(0);
+    let (maj, min) = (best(0..12), best(12..24));
+    let bi = if sc[min] >= sc[maj] { min } else { maj };
+    let minor = bi >= 12;
+    let pc = (bi % 12) as u8;
+    Some(KeyResult {
+        pitch_class: pc,
+        minor,
+        camelot: to_camelot(pc as i32, if minor { Mode::Minor } else { Mode::Major }),
+        strength: (sc[bi] as f64).clamp(0.0, 1.0),
+        scores: sc,
+    })
 }
 
 pub fn scores(f: &Feat, p: &KeyProfiles) -> [f32; 24] {
@@ -250,6 +306,26 @@ mod tests {
         assert_eq!(classify(&feat_of(&am), &p).camelot, "8A");
         let cm = chroma_for(&[(0, 1.0), (4, 0.8), (7, 0.8)]);
         assert_eq!(classify(&feat_of(&cm), &p).camelot, "8B");
+    }
+
+    #[test]
+    fn hpcp_classifier_follows_essentia_edma() {
+        // A minor scale weights (tonic, third, fifth strongest) and C major
+        let mut am = [0.05f64; 12];
+        for (pc, w) in [(9, 1.0), (0, 0.7), (4, 0.8), (2, 0.3), (11, 0.3), (5, 0.3), (7, 0.3)] {
+            am[pc] = w;
+        }
+        let r = classify_hpcp(&am).unwrap();
+        assert_eq!(r.camelot, "8A");
+        assert!(r.strength > 0.5 && r.strength <= 1.0, "{}", r.strength);
+        let mut cm = [0.05f64; 12];
+        for (pc, w) in [(0, 1.0), (4, 0.7), (7, 0.8), (2, 0.3), (5, 0.3), (9, 0.3), (11, 0.3)] {
+            cm[pc] = w;
+        }
+        assert_eq!(classify_hpcp(&cm).unwrap().camelot, "8B");
+        assert!(classify_hpcp(&[0.0; 12]).is_none());
+        // flat after the 0.2 gate: no information
+        assert!(classify_hpcp(&[1.0; 12]).is_none());
     }
 
     #[test]

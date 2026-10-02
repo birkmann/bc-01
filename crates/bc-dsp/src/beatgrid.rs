@@ -92,6 +92,15 @@ pub fn snap_nearest(grid: &BeatGrid, t: f64) -> f64 {
     at.max(0.0)
 }
 
+/// The nearest bar line to `t` (before or after), never negative: a start that
+/// lands on its own downbeat stays bar-aligned with a blend begun on a bar.
+pub fn snap_bar_nearest(grid: &BeatGrid, t: f64) -> f64 {
+    let bar = grid.period_s * 4.0;
+    let ph = phase_in(grid, t, 4);
+    let at = if ph > bar / 2.0 { t - ph + bar } else { t - ph };
+    if at < 0.0 { at + bar } else { at }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +163,9 @@ mod tests {
         // bar origin = 10.5, bar length 2.0
         close(phase_in(&g, 12.0, 4), 1.5);
         close(phase_in(&g, 10.5, 4), 0.0);
+        // bars at 10.5, 12.5, 14.5 ...
+        close(snap_bar_nearest(&g, 13.0), 12.5);
+        close(snap_bar_nearest(&g, 13.6), 14.5);
+        close(snap_bar_nearest(&g, 0.1), 0.5);
     }
 }

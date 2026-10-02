@@ -269,6 +269,8 @@ pub fn CatalogDownloadButton(
 ) -> impl IntoView {
     let busy = RwSignal::new(false);
     let result = RwSignal::new(None::<String>);
+    // Releases this press put in the download queue; pressing again would only queue duplicates.
+    let queued = RwSignal::new(None::<i64>);
     let nothing_left = move || exact.get() && missing.get() == 0;
     let run = {
         let url = url.clone();
@@ -278,6 +280,9 @@ pub fn CatalogDownloadButton(
             spawn_local(async move {
                 match api::post::<_, CatalogResult>("/explore/download/catalog", &body).await {
                     Ok(r) => {
+                        if r.queued > 0 {
+                            let _ = queued.try_set(Some(r.queued));
+                        }
                         let _ = result.try_set(Some(catalog_result(r.queued, r.skipped_in_library, &r.detail)));
                     }
                     Err(e) => {
@@ -291,10 +296,15 @@ pub fn CatalogDownloadButton(
     };
     view! {
         <span class="xg-catalog">
-            <Button variant=if small { Variant::Outline } else { Variant::Primary } size=if small { Size::Sm } else { Size::Md } icon="download"
-                busy=busy disabled=Signal::derive(nothing_left)
-                title="Queue everything from this catalogue that you do not already have" on_click=run>
-                {move || catalog_label(missing.get(), exact.get())}
+            <Button variant=if small { Variant::Outline } else { Variant::Primary } size=if small { Size::Sm } else { Size::Md }
+                icon=ds::dyn_icon(move || if queued.get().is_some() { "check" } else { "download" })
+                busy=busy disabled=Signal::derive(move || nothing_left() || queued.get().is_some())
+                title="Queue everything from this catalogue that you do not already have"
+                on_click=run>
+                {move || match queued.get() {
+                    Some(n) => format!("{} queued", format_count(n)),
+                    None => catalog_label(missing.get(), exact.get()),
+                }}
             </Button>
             {move || result.get().map(|r| view! { <span class="xg-note muted" role="status">{r}</span> })}
         </span>

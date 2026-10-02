@@ -1,4 +1,3 @@
-# Maintainer: Rafael Birkmann <mail@rafaelbirkmann.de>
 # Local build of the bc-rust workspace from the repository checkout (this file lives in packaging/).
 pkgname=bc-rust
 pkgver=0.1.0

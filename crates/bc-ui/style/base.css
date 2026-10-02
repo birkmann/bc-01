@@ -1,5 +1,7 @@
 *, *::before, *::after { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; min-width: 320px; }
+/* narrower than the 320px floor: scroll sideways instead of squeezing the layout */
+html { overflow-x: auto; }
 body {
   background: var(--color-surface-0);
   color: var(--color-ink);

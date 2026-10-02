@@ -685,6 +685,7 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
+ "zip",
  "zstd 0.14.0",
 ]
 

@@ -17,6 +17,7 @@ use crate::logic::format::format_count;
 use crate::pages::albums::host::{LibraryHost, library_listing, play_items, play_release, provide_library_host};
 use crate::player::use_player;
 use crate::widgets::common::{Art, label_link};
+use crate::widgets::{ColSize, Side, Splitter};
 
 mod logic;
 mod parts;
@@ -40,6 +41,8 @@ fn session_seed() -> i64 {
     })
 }
 
+const RAIL: ColSize = ColSize { key: "bc:ui:home-rail-w", default: 340.0, min: 260.0, max: 560.0 };
+
 fn is_wide() -> bool {
     crate::util::media_matches("(min-width: 1280px)")
 }
@@ -53,6 +56,7 @@ pub fn HomePage() -> impl IntoView {
     let seed = Memo::new(move |_| logic::seed_for(session, roll.get()));
     let wide = RwSignal::new(is_wide());
     let _ = window_event_listener(leptos::ev::resize, move |_| wide.set(is_wide()));
+    let rail_w = RAIL.signal();
 
     let home = use_query::<HomeShelves>(move || {
         let s = seed.get();
@@ -135,7 +139,7 @@ pub fn HomePage() -> impl IntoView {
                         return view! { <HomeSkeleton /> }.into_any();
                     }
                     view! {
-                        <div class="hm-cols">
+                        <div class="hm-cols" style=move || format!("--hm-rail-w:{}px", rail_w.get())>
                             <div class="hm-main">
                                 <Hero shelves=shelves />
                                 <NewInLibrary shelves=shelves />
@@ -151,6 +155,7 @@ pub fn HomePage() -> impl IntoView {
                                 })}
                             </div>
                             {move || wide.get().then(|| view! {
+                                <Splitter width=rail_w size=RAIL side=Side::Right label="Resize the side column" class="hm-splitter" />
                                 <aside class="hm-rail">
                                     <TopTen shelves=shelves />
                                     <StatTiles shelves=shelves layout=Layout::Rail />

@@ -54,22 +54,40 @@ pub fn err_text(e: &ApiErr) -> String {
     }
 }
 
-/// Set the tab title while this page is mounted, restoring the previous one on leave. The app's
-/// own screens keep its suffix; Bandcamp's records say "Bandcamp" instead (the same record can be
-/// open on its library page in another tab, and only the suffix tells them apart).
+/// The window title when no page sets one (`index.html`).
+const APP_TITLE: &str = "bc";
+
+/// Set the tab title while this page is mounted, back to the app's on leave. The app's own
+/// screens keep its suffix; Bandcamp's records say "Bandcamp" instead (the same record can be
+/// open on its library page in another tab, and only the suffix tells them apart). The title is
+/// also what "Back to …" calls this page.
+///
+/// The base is fixed, not the title found at mount: the next page mounts before the last one
+/// is cleaned up, so that title is the previous page's, and restoring it on leave would
+/// overwrite the next page's.
 pub fn use_title(app_suffix: bool, title: impl Fn() -> String + Send + Sync + 'static) {
-    let prev = crate::util::document().title();
-    let base = prev.clone();
+    let loc = leptos_router::hooks::use_location();
+    let mine = Arc::new(std::sync::Mutex::new(None::<String>));
+    let mine2 = mine.clone();
     Effect::new(move |_| {
         let t = title();
         let full = match (t.is_empty(), app_suffix) {
-            (true, _) => base.clone(),
-            (false, true) => format!("{t} \u{2014} {base}"),
+            (true, _) => APP_TITLE.to_string(),
+            (false, true) => format!("{t} \u{2014} {APP_TITLE}"),
             (false, false) => format!("{t} \u{2014} Bandcamp"),
         };
         crate::util::document().set_title(&full);
+        *mine2.lock().unwrap() = Some(full);
+        let search = loc.search.get_untracked();
+        let url = if search.is_empty() { loc.pathname.get_untracked() } else { format!("{}?{search}", loc.pathname.get_untracked()) };
+        crate::history::record_title(url, t);
     });
-    on_cleanup(move || crate::util::document().set_title(&prev));
+    on_cleanup(move || {
+        let doc = crate::util::document();
+        if mine.lock().unwrap().as_ref().is_some_and(|m| doc.title() == *m) {
+            doc.set_title(APP_TITLE);
+        }
+    });
 }
 
 /// `value`, but only once it has stood still for `ms`; `None` until then (the first value is

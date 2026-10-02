@@ -31,7 +31,7 @@ async fn service(n: usize) -> (PlayerService, Arc<EventBus>, tempfile::TempDir) 
     let dir = tempfile::tempdir().unwrap();
     let files = (0..n).map(|i| wav(dir.path(), &format!("t{i}.wav"), 3.0)).collect();
     let bus = Arc::new(EventBus::new());
-    let cfg = SessionConfig { output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 4.0, capture: None }, mpris: false, ..Default::default() };
+    let cfg = SessionConfig { output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 4.0, capture: None, cue: None }, mpris: false, ..Default::default() };
     let svc = PlayerService::with_ports(FilePorts::new(files).into_ports(), bus.clone(), cfg);
     svc.start().await;
     (svc, bus, dir)

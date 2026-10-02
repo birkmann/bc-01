@@ -251,3 +251,27 @@ pub struct DiskOut {
 pub struct DiskIn {
     pub min_free_bytes: i64,
 }
+
+/// One format Bandcamp sells (`flac`, `mp3-320`, ...).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FormatOption {
+    pub key: String,
+    pub label: String,
+}
+
+/// `GET/PUT /downloads/format`: the format purchases are downloaded in.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DownloadFormatOut {
+    /// `None`: everything comes from the public 128 kbps stream.
+    pub format: Option<String>,
+    /// The formats on offer, best first.
+    pub formats: Vec<FormatOption>,
+    /// Whether a Bandcamp cookie is set (purchases can only be found with one).
+    pub cookie: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DownloadFormatIn {
+    /// A format key, or `None` for the public stream.
+    pub format: Option<String>,
+}

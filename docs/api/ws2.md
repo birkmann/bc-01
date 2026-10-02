@@ -79,6 +79,7 @@ and register it with `JobsService::add_hooks`.
 | POST | `/downloads/parse` | `ParseUrlsRequest` | `ParsedUrls` |
 | POST | `/downloads` | `DownloadRequest` | `JobOut` (idempotent on `job_id`) |
 | GET / PUT | `/downloads/disk` | `DiskIn` | `DiskOut` |
+| GET / PUT | `/downloads/format` | `DownloadFormatIn` (`format`: a key from `formats`, or `null` for the public stream) | `DownloadFormatOut` |
 
 ### Harvest / inbox
 | Method | Path | Body / query | Response |

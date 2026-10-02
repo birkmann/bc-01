@@ -98,7 +98,7 @@ pub struct PlayerService {
 /// The output the service opens, from `BC_AUDIO` (`null` for headless runs and tests).
 pub fn output_from_env() -> OutputKind {
     match std::env::var("BC_AUDIO").ok().as_deref() {
-        Some("null") => OutputKind::Null { sample_rate: 48_000, block: 512, speed: 1.0, capture: None },
+        Some("null") => OutputKind::Null { sample_rate: 48_000, block: 512, speed: 1.0, capture: None, cue: None },
         _ => OutputKind::Cpal(OutputTarget::default()),
     }
 }

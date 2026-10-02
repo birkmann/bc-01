@@ -11,19 +11,34 @@ use crate::ds::{Button, Icon, Variant};
 use crate::player::bar::PlayerBar;
 use crate::player::plan::PlanPanel;
 use crate::player::similar::SimilarPanel;
+use crate::widgets::{ColSize, Side, Splitter};
 pub use sidebar::{NavLinks, Sidebar};
 pub use topbar::TopBar;
+
+const SIDEBAR: ColSize = ColSize { key: "bc:ui:sidebar-w", default: 232.0, min: 180.0, max: 400.0 };
 
 #[component]
 pub fn Shell(children: Children) -> impl IntoView {
     let app = use_app();
     crate::data::provide_jobs();
     crate::shortcuts::install();
+    crate::history::install();
     let loc = use_location();
+    // The sidebar width is a root variable: the header's brand cell follows it.
+    let sidebar_w = SIDEBAR.signal();
+    Effect::new(move |_| {
+        let _ = crate::util::document_element().style().set_property("--sidebar-w", &format!("{}px", sidebar_w.get()));
+    });
     // Any navigation closes the drawer.
     Effect::new(move |_| {
         loc.pathname.track();
         app.nav_open.set(false);
+    });
+    Effect::new(move |prev: Option<String>| {
+        let path = loc.pathname.get();
+        loc.search.track();
+        crate::history::on_location_change(prev.as_deref(), &path);
+        path
     });
     let connected = ws_connected();
     // Debounce the offline banner so a quick reconnect never flashes it.
@@ -44,6 +59,9 @@ pub fn Shell(children: Children) -> impl IntoView {
             <TopBar />
             <div class="shell-body">
                 <Sidebar />
+                <Show when=move || !app.nav_collapsed.get()>
+                    <Splitter width=sidebar_w size=SIDEBAR side=Side::Left label="Resize sidebar" class="sb-splitter" />
+                </Show>
                 <main class="shell-main">
                     <Show when=move || show_offline.get()>
                         <div class="offline-banner" role="status"><Icon name="wifi-off" />

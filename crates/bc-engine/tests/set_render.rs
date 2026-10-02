@@ -90,7 +90,7 @@ async fn route_streams_the_rendered_wav() {
     // the real constructor (wires the DB for the render route), without MPRIS or an audio device
     let config = bc_core::Config::from_env();
     let svc = PlayerService::new_with(db, Arc::new(EventBus::new()), &config, SessionConfig {
-        output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 0.0, capture: None },
+        output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 0.0, capture: None, cue: None },
         mpris: false,
         ..Default::default()
     });

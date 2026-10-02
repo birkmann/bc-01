@@ -56,6 +56,22 @@ pub enum TransitionKind {
     EchoOut,
     /// Hard cut quantised to a downbeat.
     Cut,
+    /// A DJ's three-band EQ blend: the incoming comes in with its bass cut, the
+    /// basslines swap on a bar line, then the outgoing's mids and highs leave.
+    EqBlend,
+}
+
+impl TransitionKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            TransitionKind::Blend => "crossfade",
+            TransitionKind::BassSwap => "bass swap",
+            TransitionKind::Filter => "filter",
+            TransitionKind::EchoOut => "echo out",
+            TransitionKind::Cut => "cut",
+            TransitionKind::EqBlend => "blend",
+        }
+    }
 }
 
 /// What the incoming deck's start is aligned to on the outgoing deck's grid.
@@ -288,10 +304,12 @@ pub struct MixSettings {
     pub sync: bool,
     /// Keep the incoming track's pitch when its tempo is changed.
     pub key_lock: bool,
-    /// How long a matched blend runs, in beats of the outgoing track (16, 32, 64).
+    /// How long a matched blend runs, in beats of the outgoing track (16, 32, 64, 128).
     pub length_beats: u32,
     /// Stay at the matched tempo afterwards instead of gliding back to 1.0.
     pub hold_tempo: bool,
+    /// Seconds the incoming's tempo takes to glide back to its own after a matched blend.
+    pub glide_back_s: f64,
     pub entry: Entry,
     /// Seconds a track plays before the next is brought in; `None` = to its outro.
     pub max_play_s: Option<f64>,
@@ -310,7 +328,14 @@ pub struct MixSettings {
     /// Phase-vocoder size for key lock.
     #[serde(default)]
     pub key_lock_quality: KeyLockQuality,
+    /// Settings revision; older stored settings are brought forward by [`MixSettings::migrate`].
+    /// Absent in settings stored before revisions existed, hence the field-level default of 0.
+    #[serde(default)]
+    pub rev: u32,
 }
+
+/// The current [`MixSettings::rev`].
+pub const MIX_SETTINGS_REV: u32 = 1;
 
 impl Default for MixSettings {
     fn default() -> Self {
@@ -318,18 +343,20 @@ impl Default for MixSettings {
             echo: true,
             sync: true,
             key_lock: false,
-            length_beats: 32,
+            length_beats: 64,
             hold_tempo: false,
+            glide_back_s: 30.0,
             entry: Entry::Drop,
             max_play_s: None,
             show_transition_bar: true,
             show_mix_out_marker: true,
-            transition: TransitionKind::Blend,
-            quantise: Quantise::Bar,
+            transition: TransitionKind::EqBlend,
+            quantise: Quantise::Phrase,
             phase_lock: true,
             normalise: true,
             target_lufs: -14.0,
             key_lock_quality: KeyLockQuality::Balanced,
+            rev: MIX_SETTINGS_REV,
         }
     }
 }
@@ -343,6 +370,7 @@ pub struct MixSettingsPatch {
     pub key_lock: Option<bool>,
     pub length_beats: Option<u32>,
     pub hold_tempo: Option<bool>,
+    pub glide_back_s: Option<f64>,
     pub entry: Option<Entry>,
     #[serde(default, deserialize_with = "double_option")]
     pub max_play_s: Option<Option<f64>>,
@@ -387,16 +415,40 @@ impl MixSettings {
         set!(target_lufs);
         set!(key_lock_quality);
         if let Some(n) = p.length_beats {
-            // 16 | 32 | 64 only, like the browser player's union type.
+            // 16 | 32 | 64 | 128 only: whole phrases.
             self.length_beats = match n {
                 0..=24 => 16,
                 25..=48 => 32,
-                _ => 64,
+                49..=96 => 64,
+                _ => 128,
             };
+        }
+        if let Some(g) = p.glide_back_s.filter(|g| g.is_finite()) {
+            self.glide_back_s = g.clamp(2.0, 300.0);
         }
         if let Some(v) = p.max_play_s {
             self.max_play_s = v;
         }
+    }
+}
+
+impl MixSettings {
+    /// Bring settings stored by an older version forward. Revision 0 had no
+    /// settings UI, so its transition, length and quantise are the old defaults:
+    /// they move to the DJ blend, 64 beats and phrase alignment.
+    pub fn migrate(&mut self) {
+        if self.rev < 1 {
+            if self.transition == TransitionKind::Blend {
+                self.transition = TransitionKind::EqBlend;
+            }
+            if self.length_beats == 32 {
+                self.length_beats = 64;
+            }
+            if self.quantise == Quantise::Bar {
+                self.quantise = Quantise::Phrase;
+            }
+        }
+        self.rev = MIX_SETTINGS_REV;
     }
 }
 
@@ -760,6 +812,10 @@ pub struct DevicesInfo {
     /// Estimated output latency in ms.
     pub latency_ms: f64,
     pub xruns: u64,
+    /// The cue device that is really open; `None` with a `target.cue_device` set means it failed
+    /// to open and previews play through the main output.
+    #[serde(default)]
+    pub cue_device: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -969,6 +1025,22 @@ mod tests {
         s.max_play_s = Some(120.0);
         s.apply(&keep);
         assert_eq!(s.max_play_s, Some(120.0));
+    }
+
+    #[test]
+    fn stored_settings_without_rev_migrate_to_the_dj_blend() {
+        let mut s: MixSettings = serde_json::from_str(r#"{"transition":"blend","length_beats":32,"quantise":"bar","echo":false}"#).unwrap();
+        assert_eq!(s.rev, 0);
+        s.migrate();
+        assert_eq!((s.transition, s.length_beats, s.quantise, s.rev), (TransitionKind::EqBlend, 64, Quantise::Phrase, MIX_SETTINGS_REV));
+        assert!(!s.echo);
+        // a current revision keeps what the user chose
+        let mut c = MixSettings { transition: TransitionKind::Blend, length_beats: 32, ..Default::default() };
+        c.migrate();
+        assert_eq!((c.transition, c.length_beats), (TransitionKind::Blend, 32));
+        let p: MixSettingsPatch = serde_json::from_str(r#"{"length_beats":128,"glide_back_s":1}"#).unwrap();
+        c.apply(&p);
+        assert_eq!((c.length_beats, c.glide_back_s), (128, 2.0));
     }
 
     #[test]

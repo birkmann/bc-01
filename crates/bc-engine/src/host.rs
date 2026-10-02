@@ -43,7 +43,16 @@ pub enum OutputKind {
     Cpal(OutputTarget),
     /// A software-paced output: renders `block` frames at a time. `speed`
     /// above 1 renders faster than real time (0 = as fast as possible).
-    Null { sample_rate: u32, block: usize, speed: f64, capture: Option<Arc<Mutex<Vec<f32>>>> },
+    /// `cue` adds a second software-paced output standing in for a headphone device.
+    Null { sample_rate: u32, block: usize, speed: f64, capture: Option<Arc<Mutex<Vec<f32>>>>, cue: Option<NullCue> },
+}
+
+/// A software-paced stand-in for a cue (headphone) device, paced like its main output.
+#[derive(Clone)]
+pub struct NullCue {
+    /// The cue device's own rate; 0 is a device that fails to open (the fallback path).
+    pub sample_rate: u32,
+    pub capture: Option<Arc<Mutex<Vec<f32>>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -53,7 +62,10 @@ pub struct StreamInfo {
     pub sample_rate: u32,
     pub buffer_frames: u32,
     pub latency_ms: f64,
+    /// The cue device that is really open (`None` when none was asked for or it failed to open).
     pub cue_device: Option<String>,
+    /// The cue device's rate; preview audio is decoded at this rate.
+    pub cue_sample_rate: u32,
 }
 
 pub fn unix_ns() -> u64 {
@@ -182,9 +194,19 @@ struct CueHandle {
     shared: Arc<SharedState>,
 }
 
+/// The audio-thread side of a cue output: its deck ring, command queue, event queue and snapshot.
+struct CueParts {
+    ring: Consumer<Chunk>,
+    cmds: Consumer<Cmd>,
+    events: Producer<Event>,
+    shared: Arc<SharedState>,
+}
+
 /// Control-side handle to the audio engine.
 pub struct Engine {
     pub sample_rate: u32,
+    /// Rate the preview deck runs at: the cue device's when one is open, else `sample_rate`.
+    pub preview_rate: u32,
     pub info: StreamInfo,
     cmd: Mutex<Producer<Cmd>>,
     events: Mutex<Consumer<Event>>,
@@ -210,25 +232,25 @@ impl Engine {
         let device_xruns = Arc::new(AtomicU64::new(0));
         let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<StreamInfo, HostError>>(1);
 
-        // cue-device rings/queues exist only when a cue device was asked for
-        let want_cue = matches!(&kind, OutputKind::Cpal(t) if t.cue_device.is_some());
-        let (cue_ring_c, cue_p2, cue_ctl) = if want_cue {
+        // Cue-device ring and queues exist only when a cue device was asked for. The main mixer
+        // keeps its own preview ring either way: if the cue device does not open, the preview
+        // falls back to the main output instead of going silent.
+        let want_cue = match &kind {
+            OutputKind::Cpal(t) => t.cue_device.is_some(),
+            OutputKind::Null { cue, .. } => cue.is_some(),
+        };
+        let (cue_prod, cue_parts, cue_handle) = if want_cue {
             let (cp, cc) = RingBuffer::<Chunk>::new(RING_CHUNKS);
             let (ctx, crx) = RingBuffer::<Cmd>::new(128);
             let (etx, erx) = RingBuffer::<Event>::new(128);
             let sh = Arc::new(SharedState::new());
-            (Some(cc), Some(cp), Some((ctx, crx, etx, erx, sh)))
+            (
+                Some(cp),
+                Some(CueParts { ring: cc, cmds: crx, events: etx, shared: sh.clone() }),
+                Some(CueHandle { cmd: Mutex::new(ctx), events: Mutex::new(erx), shared: sh }),
+            )
         } else {
             (None, None, None)
-        };
-        let (cue_cmd_rx, cue_ev_tx, cue_handle, cue_shared_for_stream) = match cue_ctl {
-            Some((ctx, crx, etx, erx, sh)) => (
-                Some(crx),
-                Some(etx),
-                Some(CueHandle { cmd: Mutex::new(ctx), events: Mutex::new(erx), shared: sh.clone() }),
-                Some(sh),
-            ),
-            None => (None, None, None, None),
         };
 
         let stop2 = stop.clone();
@@ -237,25 +259,37 @@ impl Engine {
         let owner = std::thread::Builder::new()
             .name("bc-audio-owner".into())
             .spawn(move || {
-                // dummy ring for the main mixer's preview slot when the cue device owns the preview
-                let (main_preview_ring, ring_for_cue) = match cue_ring_c {
-                    Some(cc) => {
-                        let (_dp, dc) = RingBuffer::<Chunk>::new(2);
-                        (dc, Some(cc))
-                    }
-                    None => (c2, None),
-                };
-                let ports = MixerPorts { rings: [c0, c1, main_preview_ring], cmds: cmd_rx, events: ev_tx, shared: sh2 };
+                let ports = MixerPorts { rings: [c0, c1, c2], cmds: cmd_rx, events: ev_tx, shared: sh2 };
                 let started = match kind {
-                    OutputKind::Cpal(target) => start_cpal(
-                        &target,
-                        ports,
-                        quality,
-                        dx,
-                        ring_for_cue.zip(cue_cmd_rx).zip(cue_ev_tx).zip(cue_shared_for_stream),
-                    ),
-                    OutputKind::Null { sample_rate, block, speed, capture } => {
-                        start_null(sample_rate, block, speed, capture, ports, quality, stop2.clone())
+                    OutputKind::Cpal(target) => start_cpal(&target, ports, quality, dx.clone()).map(|(keep, mut info)| {
+                        let mut keep = vec![keep];
+                        if let (Some(parts), Some(name)) = (cue_parts, target.cue_device.as_deref()) {
+                            match start_cue(name, info.sample_rate, parts, dx) {
+                                Ok((s, label, rate)) => {
+                                    keep.push(Box::new(s));
+                                    info.cue_device = Some(label);
+                                    info.cue_sample_rate = rate;
+                                }
+                                Err(e) => tracing::warn!("cue device unavailable, previews use the main output: {e}"),
+                            }
+                        }
+                        (Box::new(keep) as Keep, info)
+                    }),
+                    OutputKind::Null { sample_rate, block, speed, capture, cue } => {
+                        start_null(sample_rate, block, speed, capture, ports, quality, stop2.clone()).map(|(keep, mut info)| {
+                            let mut keep = vec![keep];
+                            if let (Some(parts), Some(c)) = (cue_parts, cue) {
+                                match start_null_cue(c, block, speed, parts, stop2.clone()) {
+                                    Ok((k, rate)) => {
+                                        keep.push(k);
+                                        info.cue_device = Some("null cue".into());
+                                        info.cue_sample_rate = rate;
+                                    }
+                                    Err(e) => tracing::warn!("cue device unavailable, previews use the main output: {e}"),
+                                }
+                            }
+                            (Box::new(keep) as Keep, info)
+                        })
                     }
                 };
                 match started {
@@ -276,23 +310,21 @@ impl Engine {
             .recv_timeout(Duration::from_secs(15))
             .map_err(|_| HostError::Stream("audio thread did not start".into()))??;
         let sr = info.sample_rate;
-        // preview decodes at the cue device's rate when it has its own device
-        let cue_sr = info.cue_device.as_ref().map(|_| sr).unwrap_or(sr);
-        let _ = cue_sr;
-        let workers = [DecodeWorker::spawn("A", sr, p0), DecodeWorker::spawn("B", sr, p1), {
-            match cue_p2 {
-                Some(cp) => DecodeWorker::spawn("cue", sr, cp),
-                None => DecodeWorker::spawn("P", sr, p2),
-            }
-        }];
+        // The preview decodes straight into the deck that plays it, at that output's rate.
+        let (preview_worker, cue, preview_rate) = match (cue_prod, cue_handle, info.cue_device.is_some()) {
+            (Some(cp), Some(h), true) => (DecodeWorker::spawn("cue", info.cue_sample_rate, cp), Some(h), info.cue_sample_rate),
+            _ => (DecodeWorker::spawn("P", sr, p2), None, sr),
+        };
+        let workers = [DecodeWorker::spawn("A", sr, p0), DecodeWorker::spawn("B", sr, p1), preview_worker];
         Ok(Engine {
             sample_rate: sr,
+            preview_rate,
             info,
             cmd: Mutex::new(cmd_tx),
             events: Mutex::new(ev_rx),
             shared,
             workers,
-            cue: cue_handle,
+            cue,
             epoch: AtomicU32::new(1),
             device_xruns,
             stop,
@@ -302,7 +334,7 @@ impl Engine {
 
     /// A null-output engine (tests, offline use): real-time paced when `speed` is 1.
     pub fn open_null(sample_rate: u32, speed: f64, capture: Option<Arc<Mutex<Vec<f32>>>>) -> Result<Engine, HostError> {
-        Self::open(OutputKind::Null { sample_rate, block: 512, speed, capture }, StretchQuality::Normal)
+        Self::open(OutputKind::Null { sample_rate, block: 512, speed, capture, cue: None }, StretchQuality::Normal)
     }
 
     pub fn next_epoch(&self) -> u32 {
@@ -363,7 +395,8 @@ impl Engine {
         let epoch = self.next_epoch();
         self.workers[deck].seek(epoch, frame);
         if deck == PREVIEW {
-            self.send_preview(Cmd::Seek { deck: 0, epoch, frame });
+            // the cue output has one deck and ignores the index; the main mixer needs it
+            self.send_preview(Cmd::Seek { deck: PREVIEW as u8, epoch, frame });
         } else {
             self.send(Cmd::Seek { deck: deck as u8, epoch, frame });
         }
@@ -392,7 +425,6 @@ impl Drop for Engine {
 }
 
 type Keep = Box<dyn std::any::Any>;
-type CueParts = Option<(((Consumer<Chunk>, Consumer<Cmd>), Producer<Event>), Arc<SharedState>)>;
 
 fn stream_err(device_xruns: Arc<AtomicU64>) -> impl FnMut(cpal::Error) + Send + 'static {
     move |err| match err.kind() {
@@ -408,7 +440,6 @@ fn start_cpal(
     ports: MixerPorts,
     quality: StretchQuality,
     device_xruns: Arc<AtomicU64>,
-    cue: CueParts,
 ) -> Result<(Keep, StreamInfo), HostError> {
     let host = cpal::default_host();
     let (device, mut config, sample_format) = pick_device(&host, &target.device)?;
@@ -437,27 +468,16 @@ fn start_cpal(
         f => return Err(HostError::Stream(format!("unsupported sample format {f}"))),
     };
     stream.play().map_err(|e| HostError::Stream(e.to_string()))?;
-    let mut keep: Vec<Box<dyn std::any::Any>> = vec![Box::new(stream)];
-    let mut cue_label = None;
-
-    if let (Some((((ring, cmds), events), shared)), Some(name)) = (cue, target.cue_device.clone()) {
-        match start_cue(&name, ring, cmds, events, shared, device_xruns.clone()) {
-            Ok((s, l)) => {
-                keep.push(Box::new(s));
-                cue_label = Some(l);
-            }
-            Err(e) => tracing::warn!("cue device unavailable: {e}"),
-        }
-    }
     let info = StreamInfo {
         backend: format!("cpal/{}", host.id().name()),
         device: label,
         sample_rate: sr,
         buffer_frames,
         latency_ms: buffer_frames as f64 * 1000.0 / sr as f64,
-        cue_device: cue_label,
+        cue_device: None,
+        cue_sample_rate: 0,
     };
-    Ok((Box::new(keep), info))
+    Ok((Box::new(stream), info))
 }
 
 fn out_ts(info: &cpal::OutputCallbackInfo) -> u64 {
@@ -516,22 +536,34 @@ where
         .map_err(|e| HostError::Stream(e.to_string()))
 }
 
-fn start_cue(
-    name: &str,
-    ring: Consumer<Chunk>,
-    cmds: Consumer<Cmd>,
-    events: Producer<Event>,
-    shared: Arc<SharedState>,
-    device_xruns: Arc<AtomicU64>,
-) -> Result<(cpal::Stream, String), HostError> {
-    let host = cpal::default_host();
-    let device = find_device(&host, &Some(name.to_string()))?;
+/// The cue device's stream config: its default format at `want_sr` (the main output's rate) when
+/// the device supports that rate, else its default config.
+fn cue_config(device: &cpal::Device, want_sr: u32) -> Result<(cpal::StreamConfig, cpal::SampleFormat), HostError> {
     let supported = device.default_output_config().map_err(|e| HostError::Stream(e.to_string()))?;
     let fmt = supported.sample_format();
-    let config: cpal::StreamConfig = supported.into();
+    let mut config: cpal::StreamConfig = supported.into();
+    if config.sample_rate != want_sr
+        && let Ok(ranges) = device.supported_output_configs()
+    {
+        let fits = ranges.into_iter().any(|r| {
+            r.sample_format() == fmt && r.channels() == config.channels && r.min_sample_rate() <= want_sr && want_sr <= r.max_sample_rate()
+        });
+        if fits {
+            config.sample_rate = want_sr;
+        }
+    }
+    Ok((config, fmt))
+}
+
+/// Open the cue device. Returns the stream, its label and the rate it really runs at.
+fn start_cue(name: &str, want_sr: u32, parts: CueParts, device_xruns: Arc<AtomicU64>) -> Result<(cpal::Stream, String, u32), HostError> {
+    let host = cpal::default_host();
+    let device = find_device(&host, &Some(name.to_string()))?;
+    let (config, fmt) = cue_config(&device, want_sr)?;
     let channels = config.channels as usize;
     let sr = config.sample_rate;
     let label = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| name.to_string());
+    let CueParts { ring, cmds, events, shared } = parts;
     let mut cue = CueOut::new(sr as f64, ring, cmds, events, shared);
     let mut scratch = vec![0.0f32; MAX_BLOCK * 2];
     macro_rules! cue_stream {
@@ -563,7 +595,7 @@ fn start_cue(
     }
     .map_err(|e| HostError::Stream(e.to_string()))?;
     stream.play().map_err(|e| HostError::Stream(e.to_string()))?;
-    Ok((stream, label))
+    Ok((stream, label, sr))
 }
 
 fn start_null(
@@ -610,14 +642,55 @@ fn start_null(
         buffer_frames: block as u32,
         latency_ms: block as f64 * 1000.0 / sample_rate as f64,
         cue_device: None,
+        cue_sample_rate: 0,
     };
-    struct JoinOnDrop(Option<std::thread::JoinHandle<()>>);
-    impl Drop for JoinOnDrop {
-        fn drop(&mut self) {
-            if let Some(h) = self.0.take() {
-                let _ = h.join();
-            }
+    Ok((Box::new(JoinOnDrop(Some(handle))), info))
+}
+
+struct JoinOnDrop(Option<std::thread::JoinHandle<()>>);
+
+impl Drop for JoinOnDrop {
+    fn drop(&mut self) {
+        if let Some(h) = self.0.take() {
+            let _ = h.join();
         }
     }
-    Ok((Box::new(JoinOnDrop(Some(handle))), info))
+}
+
+/// A software-paced cue output (tests): renders the preview deck at its own rate, paced like
+/// the main null output. Returns what keeps it running and its rate.
+fn start_null_cue(cue: NullCue, block: usize, speed: f64, parts: CueParts, stop: Arc<AtomicBool>) -> Result<(Keep, u32), HostError> {
+    let NullCue { sample_rate, capture } = cue;
+    if sample_rate == 0 {
+        return Err(HostError::NoDevice("null cue device has no sample rate".into()));
+    }
+    let CueParts { ring, cmds, events, shared } = parts;
+    let mut cue = CueOut::new(sample_rate as f64, ring, cmds, events, shared);
+    let block = block.clamp(32, MAX_BLOCK);
+    let handle = std::thread::Builder::new()
+        .name("bc-null-cue".into())
+        .spawn(move || {
+            let mut buf = vec![0.0f32; block * 2];
+            let start = std::time::Instant::now();
+            let mut rendered: u64 = 0;
+            while !stop.load(Ordering::Relaxed) {
+                if speed > 0.0 {
+                    let due = rendered as f64 / sample_rate as f64 / speed;
+                    let now = start.elapsed().as_secs_f64();
+                    if due > now + 0.001 {
+                        std::thread::sleep(Duration::from_secs_f64((due - now).min(0.01)));
+                        continue;
+                    }
+                } else {
+                    std::thread::sleep(Duration::from_micros(200));
+                }
+                cue.render(&mut buf, block, unix_ns());
+                if let Some(c) = &capture {
+                    c.lock().extend_from_slice(&buf);
+                }
+                rendered += block as u64;
+            }
+        })
+        .map_err(|e| HostError::Stream(e.to_string()))?;
+    Ok((Box::new(JoinOnDrop(Some(handle))), sample_rate))
 }

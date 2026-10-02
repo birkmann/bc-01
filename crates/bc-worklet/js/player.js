@@ -16,7 +16,7 @@
 // decoding a whole file. PCM reaches the worklet through a SharedArrayBuffer ring when the page is
 // cross-origin isolated (the server sends COOP/COEP), and through postMessage transfer otherwise.
 
-const KIND = { blend: 0, bass_swap: 1, filter: 2, echo_out: 3, cut: 4 };
+const KIND = { blend: 0, bass_swap: 1, filter: 2, echo_out: 3, cut: 4, eq_blend: 5 };
 const QUANT = { off: 0, beat: 1, bar: 2, phrase: 3 };
 const EVENTS = {
   1: 'ready', 2: 'started', 3: 'ended', 4: 'advanced', 5: 'underrun', 6: 'transition', 7: 'retimed',

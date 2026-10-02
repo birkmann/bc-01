@@ -1,5 +1,5 @@
 //! The real-time mixer graph: two decks with per-channel 3-band EQ + filter +
-//! echo send, a preview deck, an equal-power / EQ / filter / echo transition
+//! echo send, a preview deck, an equal-power / EQ-blend / filter / echo transition
 //! engine, the phase-lock loop, a master strip, echo bus and look-ahead
 //! limiter. `render` is the single entry point called from the audio callback
 //! (cpal), the AudioWorklet (wasm) or the offline renderer.
@@ -27,7 +27,9 @@ const PREVIEW: usize = 2;
 const DIP_TAU_S: f64 = 0.0015;
 const PAUSE_TAU_S: f64 = 0.004;
 /// A quantised start never waits longer than this for the next boundary.
-const MAX_QUANT_WAIT_S: f64 = 8.0;
+const MAX_QUANT_WAIT_S: f64 = 10.0;
+/// Automation lanes a transition can drive besides the two channel gains.
+const EXT_LANES: usize = 6;
 /// A transition whose incoming deck has no data after this long starts anyway.
 const READY_TIMEOUT_S: f64 = 3.0;
 const PLL_PERIOD_FRAMES: u64 = 512;
@@ -107,6 +109,8 @@ struct Ext {
 enum ExtKind {
     Filter,
     Low,
+    Mid,
+    High,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -129,7 +133,7 @@ struct Tr {
     fade_done: bool,
     env_in: Env,
     env_out: Env,
-    ext: [Option<Ext>; 4],
+    ext: [Option<Ext>; EXT_LANES],
     phase: Option<PhaseState>,
     pll_i: f64,
     next_pll: u64,
@@ -370,6 +374,10 @@ impl Mixer {
                 self.armed_next = None;
                 self.echo.set_wet(0.0);
             }
+            Cmd::Seek { deck, epoch, frame } if deck as usize == PREVIEW => {
+                self.preview.seek(epoch, frame);
+                self.ready_sent[PREVIEW] = false;
+            }
             Cmd::Seek { deck, epoch, frame } => {
                 let d = deck as usize & 1;
                 if self.ch[d].deck.state() == DeckState::Playing && !self.paused_silent() {
@@ -398,13 +406,25 @@ impl Mixer {
                 // its outgoing is very likely this one's incoming, freshly cued: keep it
                 self.finish_transition_keeping(true, Some(inc));
                 self.ch[inc].deck.cancel_glide();
+                // the outgoing holds its tempo for the blend; should it have moved since the plan
+                // (still gliding back from the previous blend), the match follows it
+                self.ch[out].deck.cancel_glide();
+                let mut spec = spec;
+                if let Some(s) = spec.sync.as_mut()
+                    && s.out_rate > 0.0 {
+                        let now_rate = self.ch[out].deck.rate_base;
+                        if now_rate > 0.0 && (now_rate / s.out_rate - 1.0).abs() > 1e-5 {
+                            s.rate *= now_rate / s.out_rate;
+                            s.to_bpm *= now_rate / s.out_rate;
+                            s.out_rate = now_rate;
+                        }
+                    }
                 let rate = spec.sync.map(|s| s.rate).unwrap_or(1.0);
                 // key lock only where a tempo match asks for it and the rate is not unity (vinyl at 1.0 is bit-exact)
                 let kl = spec.sync.map(|s| s.key_lock && (s.rate - 1.0).abs() > 1e-4).unwrap_or(false);
                 if self.ch[inc].deck.state() != DeckState::Empty {
                     self.ch[inc].deck.set_rate(rate, kl);
                 }
-                self.ch[out].deck.cancel_glide();
                 self.ch[inc].reset_lanes(0.0);
                 let start_frame = self.quantised_start(out, &spec);
                 let timeout = start_frame + (READY_TIMEOUT_S * self.sr) as u64;
@@ -421,7 +441,7 @@ impl Mixer {
                     fade_done: false,
                     env_in: Env::new(0.0, 1.0, now, now, Shape::Linear),
                     env_out: Env::new(1.0, 0.0, now, now, Shape::Linear),
-                    ext: [None; 4],
+                    ext: [None; EXT_LANES],
                     phase: None,
                     pll_i: 0.0,
                     next_pll: 0,
@@ -488,33 +508,32 @@ impl Mixer {
         if spec.quantise == Quantise::Off || d.state() != DeckState::Playing {
             return now;
         }
-        let beats = match spec.quantise {
+        let wanted = match spec.quantise {
             Quantise::Off => return now,
             Quantise::Beat => 1,
             Quantise::Bar => 4,
             Quantise::Phrase => 16,
         };
-        let len = g.period_s * beats as f64;
-        let phase = phase_in(&g, d.position_s(), beats);
-        // just past a boundary: start now, the loop absorbs the few ms
-        if phase < 0.03 {
-            return now;
-        }
-        let wait_src_s = len - phase;
         let rate = d.rate_eff().max(0.1);
-        let wait_s = wait_src_s / rate;
-        // never let the quantise push the blend past the end of the outgoing track
         let end = d.end_frame().unwrap_or(d.len_frames);
-        if end > 0 {
-            let left_s = (end as f64 - d.position_frames()) / self.sr / rate;
-            if wait_s > left_s - spec.length_s - 0.5 {
+        let left_s = (end > 0).then(|| (end as f64 - d.position_frames()) / self.sr / rate);
+        // the asked-for boundary when it comes in time, else the next finer one: a blend that
+        // cannot wait for the phrase still starts on a bar, rather than anywhere
+        for beats in [16u32, 4, 1].into_iter().filter(|b| *b <= wanted) {
+            let len = g.period_s * beats as f64;
+            let phase = phase_in(&g, d.position_s(), beats);
+            // just past a boundary: start now, the loop absorbs the few ms
+            if phase < 0.03 {
                 return now;
             }
+            let wait_s = (len - phase) / rate;
+            // never let the quantise push the blend past the end of the outgoing track
+            if left_s.is_some_and(|l| wait_s > l - spec.length_s - 0.5) || wait_s > MAX_QUANT_WAIT_S {
+                continue;
+            }
+            return now + (wait_s * self.sr).round() as u64;
         }
-        if wait_s > MAX_QUANT_WAIT_S {
-            return now;
-        }
-        now + (wait_s * self.sr).round() as u64
+        now
     }
 
     // ------------------------------------------------------------------
@@ -541,7 +560,7 @@ impl Mixer {
         t.stage = Stage::Running;
         let power = t.spec.curve == Curve::EqualPower;
         let (sh_in, sh_out) = if power { (Shape::In, Shape::Out) } else { (Shape::Linear, Shape::Linear) };
-        t.ext = [None; 4];
+        t.ext = [None; EXT_LANES];
 
         // Start the incoming deck now (sample-exact: this runs at a segment edge).
         self.ch[i].deck.start();
@@ -556,13 +575,36 @@ impl Mixer {
             TransitionKind::BassSwap => {
                 t.env_in = Env::new(0.0, 1.0, now, t.t1, sh_in);
                 t.env_out = Env::new(1.0, 0.0, now, t.t1, sh_out);
-                let swap = self.swap_time(&t, o, now, length_s);
+                let swap = self.bar_near(o, now, length_s, now + length_s * 0.5, 0.25, 0.75);
                 let ramp = 0.03;
                 t.ext[0] = Some(Ext { ch: i, which: ExtKind::Low, env: Env::new(0.0, 1.0, swap - ramp / 2.0, swap + ramp / 2.0, Shape::Linear), fin: 1.0, step: true });
                 t.ext[1] = Some(Ext { ch: o, which: ExtKind::Low, env: Env::new(1.0, 0.0, swap - ramp / 2.0, swap + ramp / 2.0, Shape::Linear), fin: 0.0, step: true });
                 // incoming enters with its low band out of the way from the first sample
                 self.ch[i].low = Auto::Env(t.ext[0].map(|e| e.env).unwrap_or(Env::new(0.0, 0.0, now, now, Shape::Linear)));
                 self.ch[o].low = Auto::Env(t.ext[1].map(|e| e.env).unwrap_or(Env::new(1.0, 1.0, now, now, Shape::Linear)));
+            }
+            TransitionKind::EqBlend => {
+                // How a DJ blends on a three-band mixer, all on the outgoing's bar lines:
+                // 1. the incoming's fader comes up with its bass cut and highs half down
+                // 2. both play, the outgoing's mids make a little room
+                // 3. on a bar (the incoming's drop when known) the basslines swap
+                // 4. the outgoing's highs, then its fader, go
+                let swap = match t.spec.swap_s {
+                    Some(s) => self.bar_near(o, now, length_s, now + s.clamp(length_s * 0.2, length_s * 0.85), 0.2, 0.85),
+                    None => self.bar_near(o, now, length_s, now + length_s * 0.5, 0.3, 0.7),
+                };
+                let beat = self.beat_wall_s(o, &t.spec);
+                let ramp = (beat * 0.25).clamp(0.03, 0.15);
+                let up = now + (swap - now) * 0.55;
+                let out_hi_gone = swap + (t.t1 - swap) * 0.7;
+                t.env_in = Env::new(0.0, 1.0, now, up, Shape::In);
+                t.env_out = Env::new(1.0, 0.0, swap, t.t1, Shape::Out);
+                let lin = Shape::Linear;
+                t.ext[0] = Some(Ext { ch: i, which: ExtKind::Low, env: Env::new(0.0, 1.0, swap - ramp / 2.0, swap + ramp / 2.0, lin), fin: 1.0, step: true });
+                t.ext[1] = Some(Ext { ch: o, which: ExtKind::Low, env: Env::new(1.0, 0.0, swap - ramp / 2.0, swap + ramp / 2.0, lin), fin: 0.0, step: true });
+                t.ext[2] = Some(Ext { ch: i, which: ExtKind::High, env: Env::new(0.5, 1.0, now, swap, lin), fin: 1.0, step: false });
+                t.ext[3] = Some(Ext { ch: o, which: ExtKind::Mid, env: Env::new(1.0, 0.75, up, swap, lin), fin: 0.75, step: false });
+                t.ext[4] = Some(Ext { ch: o, which: ExtKind::High, env: Env::new(1.0, 0.0, swap, out_hi_gone, lin), fin: 0.0, step: false });
             }
             TransitionKind::Filter => {
                 // incoming opens from a closed low-pass; outgoing high-pass-sweeps out
@@ -583,10 +625,7 @@ impl Mixer {
         self.ch[i].gain = Auto::Env(t.env_in);
         self.ch[o].gain = Auto::Env(t.env_out);
         for e in t.ext.iter().flatten() {
-            match e.which {
-                ExtKind::Filter => self.ch[e.ch].filter = Auto::Env(e.env),
-                ExtKind::Low => self.ch[e.ch].low = Auto::Env(e.env),
-            }
+            self.set_lane(e);
         }
         // the echo repeats at a dotted eighth of the outgoing tune -- set before the send opens
         if let Some(e) = t.spec.echo {
@@ -627,28 +666,47 @@ impl Mixer {
         self.emit(Event::Started { deck: i as u8, frame: self.frames });
     }
 
-    /// The time (engine seconds) of the bass swap: the middle of the blend,
-    /// snapped to the nearest bar boundary of the outgoing grid when known.
-    fn swap_time(&self, t: &Tr, out: usize, now: f64, length_s: f64) -> f64 {
-        let mid = now + length_s * 0.5;
+    /// The bar line of the outgoing grid nearest `target` (engine seconds) within
+    /// `lo..hi` of the blend that began at `now`; `target` itself without a grid or bar there.
+    fn bar_near(&self, out: usize, now: f64, length_s: f64, target: f64, lo: f64, hi: f64) -> f64 {
         let d = &self.ch[out].deck;
-        let Some(g) = d.grid else { return mid };
+        let Some(g) = d.grid else { return target };
         let rate = d.rate_eff().max(0.1);
         let bar = g.period_s * 4.0;
         let phase = phase_in(&g, d.position_s(), 4);
-        let mut best = mid;
+        let mut best = target;
         let mut best_d = f64::MAX;
         let mut k = 0.0;
-        while k < 40.0 {
+        while k < 64.0 {
             let at = now + (k * bar - phase) / rate;
-            if at >= now + length_s * 0.25 && at <= now + length_s * 0.75 && (at - mid).abs() < best_d {
-                best_d = (at - mid).abs();
+            if at >= now + length_s * lo && at <= now + length_s * hi && (at - target).abs() < best_d {
+                best_d = (at - target).abs();
                 best = at;
             }
             k += 1.0;
         }
-        let _ = t;
         best
+    }
+
+    /// One beat of the outgoing, in wall seconds (from its grid, else the planned tempo).
+    fn beat_wall_s(&self, out: usize, spec: &BlendSpec) -> f64 {
+        let d = &self.ch[out].deck;
+        match (d.grid, spec.sync, spec.echo.and_then(|e| e.bpm)) {
+            (Some(g), _, _) => g.period_s / d.rate_eff().max(0.1),
+            (None, Some(s), _) if s.to_bpm > 0.0 => 60.0 / s.to_bpm,
+            (None, _, Some(b)) if b > 0.0 => 60.0 / b,
+            _ => 0.5,
+        }
+    }
+
+    fn set_lane(&mut self, e: &Ext) {
+        let lane = Auto::Env(e.env);
+        match e.which {
+            ExtKind::Filter => self.ch[e.ch].filter = lane,
+            ExtKind::Low => self.ch[e.ch].low = lane,
+            ExtKind::Mid => self.ch[e.ch].mid = lane,
+            ExtKind::High => self.ch[e.ch].high = lane,
+        }
     }
 
     /// Residual of the incoming's beat phase against the outgoing's, in wall
@@ -692,24 +750,46 @@ impl Mixer {
                 r = r.min((left - 0.2).max(CUT_S));
             }
         }
-        t.env_in = retimed(&t.env_in, now, now + r);
-        t.env_out = retimed(&t.env_out, now, now + r);
-        t.t1 = now + r;
+        // Everything still to come is squeezed or stretched by the same factor, so a
+        // staged blend keeps its order (fader up, swap, fade out) at the new pace.
+        let left = t.t1 - now;
+        let k = if left > 1e-3 { r / left } else { 0.0 };
+        let scale = |e: &Env| -> Env {
+            if e.t1 <= now {
+                *e
+            } else if e.t0 >= now {
+                Env { t0: now + (e.t0 - now) * k, t1: (now + (e.t1 - now) * k).max(now + (e.t0 - now) * k + 0.001), ..*e }
+            } else {
+                retimed(e, now, now + (e.t1 - now) * k)
+            }
+        };
+        t.env_in = scale(&t.env_in);
+        t.env_out = scale(&t.env_out);
         for e in t.ext.iter_mut().flatten() {
             if e.step {
-                let cur = e.env.value_at(now);
-                e.env = Env::new(cur, e.fin, now, now + 0.03, Shape::Linear);
+                if e.env.t1 <= now {
+                    continue;
+                }
+                if e.env.t0 < now || r < 2.0 {
+                    // mid-swap, or "cut now": finish the swap at once
+                    let cur = e.env.value_at(now);
+                    e.env = Env::new(cur, e.fin, now, now + 0.03, Shape::Linear);
+                } else {
+                    // a swap still to come moves with the blend, back onto a bar line
+                    let half = (e.env.t1 - e.env.t0) / 2.0;
+                    let c = now + (e.env.t0 + half - now) * k;
+                    let c = self.bar_near(t.out, now, r, c, 0.05, 0.95);
+                    e.env = Env { t0: c - half, t1: c + half, ..e.env };
+                }
             } else {
-                e.env = retimed(&e.env, now, now + r);
+                e.env = scale(&e.env);
             }
         }
         self.ch[t.inc].gain = Auto::Env(t.env_in);
         self.ch[t.out].gain = Auto::Env(t.env_out);
+        t.t1 = now + r;
         for e in t.ext.iter().flatten() {
-            match e.which {
-                ExtKind::Filter => self.ch[e.ch].filter = Auto::Env(e.env),
-                ExtKind::Low => self.ch[e.ch].low = Auto::Env(e.env),
-            }
+            self.set_lane(e);
         }
         let cur = self.ch[t.out].send.value(now);
         if let (true, Some(e)) = (t.echo_on, t.spec.echo) {
@@ -793,6 +873,8 @@ impl Mixer {
             self.ch[i].gain = self.ch[i].gain.ramp_to(now, 1.0, 0.02);
             self.ch[i].filter = self.ch[i].filter.ramp_to(now, 0.0, 0.02);
             self.ch[i].low = self.ch[i].low.ramp_to(now, 1.0, 0.02);
+            self.ch[i].mid = self.ch[i].mid.ramp_to(now, 1.0, 0.02);
+            self.ch[i].high = self.ch[i].high.ramp_to(now, 1.0, 0.02);
         }
         self.ch[i].deck.set_pll_trim(0.0);
         if keep != Some(o) {
@@ -844,6 +926,8 @@ impl Mixer {
                     self.ch[t.inc].gain = Auto::Const(1.0);
                     self.ch[t.inc].filter = Auto::Const(0.0);
                     self.ch[t.inc].low = Auto::Const(1.0);
+                    self.ch[t.inc].mid = Auto::Const(1.0);
+                    self.ch[t.inc].high = Auto::Const(1.0);
                     self.ch[t.inc].deck.set_pll_trim(0.0);
                     self.ch[t.out].gain = Auto::Const(0.0);
                     self.emit(Event::FadeDone);
@@ -857,7 +941,7 @@ impl Mixer {
                     if let Some(s) = t.spec.sync {
                         let d = &mut self.ch[i].deck;
                         if !s.hold && (d.rate_base - 1.0).abs() > 1e-4 {
-                            d.glide_to(1.0, GLIDE_BACK_S);
+                            d.glide_to(1.0, if s.glide_s > 0.0 { s.glide_s } else { GLIDE_BACK_S });
                         }
                     }
                     self.tr = None;

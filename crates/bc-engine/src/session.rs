@@ -15,8 +15,8 @@ use crate::mixpoints::{self, MixPoints, OUT_BEFORE_END_S};
 use crate::plan;
 use crate::ports::{PortError, Ports, Rng};
 use crate::queue_ops::{self, QueueShape};
-use bc_dsp::beatgrid::{BeatGrid, grid_absolute, grid_for, snap_nearest};
-use bc_dsp::beatmatch::{BlendSpec, IncomingFacts, OutgoingFacts, cut_spec, plan_blend, short_blend, trigger_point};
+use bc_dsp::beatgrid::{BeatGrid, grid_absolute, grid_for, snap_bar_nearest, snap_nearest};
+use bc_dsp::beatmatch::{BlendSpec, IncomingFacts, OutgoingFacts, cut_spec, plan_blend, short_blend, trigger_point, trigger_slack_s};
 use bc_dsp::mixer::{Cmd, Event};
 use bc_dsp::norm::trim_gain;
 use bc_dsp::stretch::StretchQuality;
@@ -399,6 +399,11 @@ impl Session {
         self.engine.as_ref().map(|e| e.sample_rate as f64).unwrap_or(48_000.0)
     }
 
+    /// Rate of the preview deck: the cue device's when it has its own, else the main output's.
+    fn preview_sr(&self) -> f64 {
+        self.engine.as_ref().map(|e| e.preview_rate as f64).unwrap_or(48_000.0)
+    }
+
     fn send(&self, c: Cmd) {
         if let Some(e) = &self.engine
             && !e.send(c) {
@@ -442,6 +447,7 @@ impl Session {
             buffer_frames: info.buffer_frames,
             latency_ms: info.latency_ms,
             xruns: xr,
+            cue_device: info.cue_device,
         };
         self.d_state = true;
     }
@@ -1186,6 +1192,7 @@ impl Session {
             sy.rate = rate;
             sy.key_lock = kl && (rate - 1.0).abs() > 1e-4;
             sy.hold = true;
+            sy.out_rate = 0.0;
             sy.to_bpm = in_bpm.map(|b| b * rate).unwrap_or(sy.to_bpm);
         }
         // A DJ set pinned this transition: its overlap is the blend's length and
@@ -1195,7 +1202,7 @@ impl Session {
                 Some(o) if out_dur > 0.0 => (out_dur - o - 0.5).max(0.5),
                 _ => b,
             };
-            return Some(BlendSpec { length_s: b.min(remaining), incoming_start_s: in_points.in_s, ..spec });
+            return Some(BlendSpec { length_s: b.min(remaining), incoming_start_s: in_points.in_s, swap_s: None, ..spec });
         }
         Some(spec)
     }
@@ -1239,16 +1246,16 @@ impl Session {
         // handover: blend only when something is audibly playing
         let blending = handover != Handover::None && self.st.mix && self.playing_now();
         let cutting = self.playing_now() && !blending; // declick cut under the old audio
-        let spec = if blending { self.plan_for(&item, handover) } else if cutting { Some(cut_spec(0.0)) } else { None };
+        let mut spec = if blending { self.plan_for(&item, handover) } else if cutting { Some(cut_spec(0.0)) } else { None };
         let mut start_s = match (&spec, blending) {
             (Some(s), true) => s.incoming_start_s,
             _ => resume_pos.unwrap_or(0.0),
         };
-        // beat-quantised start: land the incoming on a beat of its own grid
+        // beat-quantised start: land the incoming on a beat (a bar) of its own grid
         if blending
-            && let (Some(g), Some(s)) = (info.grid, spec.as_ref())
+            && let (Some(g), Some(s)) = (info.grid, spec.as_mut())
                 && s.sync.is_some() && s.quantise != Quantise::Off {
-                    start_s = snap_nearest(&g, start_s);
+                    start_s = snap_start(&g, start_s, s);
                 }
         let deck = match self.cur_deck {
             Some(d) if self.decks[d].is_some() && (blending || cutting) => d ^ 1,
@@ -1523,11 +1530,11 @@ impl Session {
         let will_blend = self.st.mix && self.decks[cur].as_ref().map(|d| d.points.out_s.is_some()).unwrap_or(false);
         let (spec, start_s, handover) = if will_blend {
             match self.plan_for(&item, Handover::Long) {
-                Some(s) => {
+                Some(mut s) => {
                     let info = self.info_for(&item);
                     let mut st = s.incoming_start_s;
                     if let (Some(g), true) = (info.grid, s.sync.is_some() && s.quantise != Quantise::Off) {
-                        st = snap_nearest(&g, st);
+                        st = snap_start(&g, st, &mut s);
                     }
                     (Some(s), st, Handover::Long)
                 }
@@ -1833,7 +1840,9 @@ impl Session {
             Some(n) if !self.st.shuffle || self.primed.is_some() => self.plan_for(&n, Handover::Long).map(|s| s.length_s).unwrap_or(0.0),
             _ => 0.0,
         };
-        let outro_trigger = if length_s > 0.0 { trigger_point(outro_s, dur, length_s) } else { outro_s };
+        // leave the incoming time to load and the start time to wait for its bar / phrase
+        let slack = trigger_slack_s(self.st.mix_settings.quantise, self.decks[self.cur_deck.unwrap_or(0)].as_ref().and_then(|d| d.bpm));
+        let outro_trigger = if length_s > 0.0 { trigger_point(outro_s, dur, length_s, slack) } else { outro_s };
         let max_play = self.st.mix_settings.max_play_s;
         let limit_s = max_play.map(|m| self.started_at_s + m).unwrap_or(f64::INFINITY);
         let over = self.st.mix_out_override_s;
@@ -2136,8 +2145,7 @@ impl Session {
         let Ok(source) = self.source_for(&item) else {
             return;
         };
-        let sr = self.sr();
-        let frame = (start_s * sr).round() as u64;
+        let frame = (start_s * self.preview_sr()).round() as u64;
         let Some(e) = self.engine.as_ref() else { return };
         let (epoch, rx) = e.begin_load(PREVIEW, source, frame);
         self.preview_loading = Some(PreviewLoad { epoch, rx, start_s, cued: false });
@@ -2154,8 +2162,7 @@ impl Session {
         let PreviewLoad { epoch, rx, start_s, cued } = p;
         match rx.try_recv() {
             Ok(Ok(opened)) => {
-                let sr = self.sr();
-                let frame = (start_s * sr).round() as u64;
+                let frame = (start_s * self.preview_sr()).round() as u64;
                 if let Some(e) = &self.engine {
                     e.send_preview(Cmd::PreviewCue { epoch, frame, len_frames: opened.len_frames, gain: 0.9 });
                 }
@@ -2285,8 +2292,12 @@ impl Session {
             if let Some(x) = g("mix").and_then(|x| x.as_bool()) {
                 self.st.mix = x;
             }
-            if let Some(x) = g("mix_settings").and_then(|x| serde_json::from_value(x).ok()) {
+            if let Some(x) = g("mix_settings").and_then(|x| serde_json::from_value::<MixSettings>(x).ok()) {
                 self.st.mix_settings = x;
+                if self.st.mix_settings.rev < bc_types::player::MIX_SETTINGS_REV {
+                    self.st.mix_settings.migrate();
+                    self.d_prefs = true;
+                }
             }
             if let Some(x) = g("strip").and_then(|x| serde_json::from_value(x).ok()) {
                 self.st.strip = x;
@@ -2378,7 +2389,7 @@ impl Session {
             return 0.0;
         }
         let s = if e.has_cue() { e.cue_snapshot().unwrap_or_default() } else { e.snapshot() };
-        s.decks[PREVIEW].pos_frames / e.sample_rate as f64
+        s.decks[PREVIEW].pos_frames / e.preview_rate.max(1) as f64
     }
 
     /// Entry / exit points of the current track and the next rows, for the UI planner.
@@ -2599,6 +2610,21 @@ fn fan_batch(ports: &Ports, cursor: &FanCursor) -> Option<(Vec<QueueItem>, i64)>
 }
 
 /// A set slot's plan for one track: mix points and, when the set tempo-adjusts it, `(rate, key_lock)`.
+/// Where a matched incoming starts: on a beat of its own grid, on a bar when the
+/// blend is bar- or phrase-aligned, so its bars run with the outgoing's. A planned
+/// bass swap moves with the start, staying on the same place in the incoming.
+fn snap_start(g: &BeatGrid, start_s: f64, spec: &mut BlendSpec) -> f64 {
+    let st = match spec.quantise {
+        Quantise::Bar | Quantise::Phrase => snap_bar_nearest(g, start_s),
+        _ => snap_nearest(g, start_s),
+    };
+    if let (Some(sw), Some(sy)) = (spec.swap_s.as_mut(), spec.sync) {
+        *sw = (*sw - (st - start_s) / sy.rate.max(0.1)).max(0.0);
+    }
+    spec.incoming_start_s = st;
+    st
+}
+
 fn quality_code(q: KeyLockQuality) -> u8 {
     match q {
         KeyLockQuality::Fast => 0,
@@ -2717,7 +2743,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let files: Vec<PathBuf> = (0..n).map(|i| wav(dir.path(), &format!("t{i}.wav"), 1.0)).collect();
         let fp = FilePorts::new(files);
-        let cfg = SessionConfig { output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 0.0, capture: None }, ..Default::default() };
+        let cfg = SessionConfig { output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 0.0, capture: None, cue: None }, ..Default::default() };
         (Session::new(fp.into_ports(), Box::new(NullPublisher), cfg), dir)
     }
 
@@ -2872,7 +2898,7 @@ mod tests {
         let files: Vec<PathBuf> = (0..3).map(|i| wav(dir.path(), &format!("s{i}.wav"), 1.0)).collect();
         let mut fp = FilePorts::new(files);
         fp.duration_ms = vec![Some(200_000); 3];
-        let cfg = SessionConfig { output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 0.0, capture: None }, mpris: false, ..Default::default() };
+        let cfg = SessionConfig { output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 0.0, capture: None, cue: None }, mpris: false, ..Default::default() };
         let mut s = Session::new(fp.into_ports(), Box::new(NullPublisher), cfg);
         s.handle(PlayerCommand::StartSource { source: QueueSource::Set { id: 1, name: "x".into() }, shuffle: false }).unwrap();
         let t0 = Instant::now();

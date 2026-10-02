@@ -121,7 +121,7 @@ const p = await BcPlayer.create({ wasmUrl: '/bc_worklet.wasm', processorUrl: '/p
 await p.load(0, '/api/stream/42', { startS: 30, rate: 1, keylock: false, trim: 1, grid: { originS, periodS } })
 p.play(0)                                   // click-free cut start of a primed deck
 await p.load(1, '/api/stream/43', { startS: 20, rate: 1.016, keylock: false })
-p.transition({ out: 0, inc: 1, kind: 'blend'|'bass_swap'|'filter'|'echo_out'|'cut', lengthS: 15,
+p.transition({ out: 0, inc: 1, kind: 'blend'|'bass_swap'|'filter'|'echo_out'|'cut'|'eq_blend', lengthS: 15,
                echo: { send: .65, holdS: 3, upS: .3, bpm: 128 }, sync: { rate: 1.016, fromBpm: 126, toBpm: 128 },
                quantise: 'bar', phaseLock: true })
 p.retime(s); p.cutNow(); p.setEcho(on); p.setSync(on); p.nudge(0.04)

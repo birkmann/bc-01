@@ -6,6 +6,7 @@
 //! | POST | `/downloads/parse` | validate a URL list |
 //! | POST | `/downloads` | queue downloads (idempotent on `job_id`) |
 //! | GET / PUT | `/downloads/disk` | disk guard state / free-space limit |
+//! | GET / PUT | `/downloads/format` | the format purchases are downloaded in |
 
 #![allow(clippy::collapsible_if)]
 
@@ -18,11 +19,11 @@ use axum::{Json, Router};
 use bc_core::paths::safe_subdir_name;
 use bc_jobs::{ApiError, NewItem, NewJob, create_job_in};
 use bc_types::bandcamp::{DownloadRequest, ParseUrlsRequest, ParsedUrls};
-use bc_types::jobs::{DiskIn, DiskOut, JobOut, TOPIC_JOB_PROGRESS};
+use bc_types::jobs::{DiskIn, DiskOut, DownloadFormatIn, DownloadFormatOut, FormatOption, JobOut, TOPIC_JOB_PROGRESS};
 use serde_json::json;
 
 use crate::download::dedup::{find_known, url_key};
-use crate::download::diskguard;
+use crate::download::{diskguard, owned};
 use crate::download::library_port::{BcLibrary, LibraryPort};
 use crate::download::worker::{DownloadServices, resolve_downloads_base};
 use crate::service::Ctx;
@@ -134,6 +135,7 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
         .route("/downloads/parse", post(parse_urls))
         .route("/downloads", post(submit_downloads))
         .route("/downloads/disk", get(get_disk).put(put_disk))
+        .route("/downloads/format", get(get_format).put(put_format))
         .with_state(ctx)
 }
 
@@ -327,4 +329,27 @@ async fn put_disk(State(ctx): State<Arc<Ctx>>, Json(body): Json<DiskIn>) -> ApiR
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(out))
+}
+
+fn format_out(ctx: &Ctx, format: Option<&str>) -> DownloadFormatOut {
+    DownloadFormatOut {
+        format: format.map(str::to_string),
+        formats: owned::FORMATS.iter().map(|(key, label, _)| FormatOption { key: key.to_string(), label: label.to_string() }).collect(),
+        cookie: ctx.client.has_cookie(),
+    }
+}
+
+async fn get_format(State(ctx): State<Arc<Ctx>>) -> ApiResult<Json<DownloadFormatOut>> {
+    let db = ctx.db.clone();
+    let format = tokio::task::spawn_blocking(move || owned::read_format(&db)).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(format_out(&ctx, format)))
+}
+
+async fn put_format(State(ctx): State<Arc<Ctx>>, Json(body): Json<DownloadFormatIn>) -> ApiResult<Json<DownloadFormatOut>> {
+    let format = match body.format.as_deref().map(str::trim).filter(|f| !f.is_empty() && *f != "stream") {
+        None => None,
+        Some(f) => Some(owned::parse_format(f).ok_or_else(|| ApiError::new(422, "Unprocessable Entity").detail(format!("unknown format {f:?}")))?),
+    };
+    owned::write_format_async(&ctx.db, format).await?;
+    Ok(Json(format_out(&ctx, format)))
 }

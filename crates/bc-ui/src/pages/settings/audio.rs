@@ -1,7 +1,7 @@
 //! Settings > Audio: output and cue devices, buffer size, loudness normalisation,
-//! key lock default and the waveform style (stored in `ui.prefs`, mirrored to
+//! key lock default, how DJ mix transitions are shaped, and the waveform style (stored in `ui.prefs`, mirrored to
 //! localStorage `bc:wave:style`).
-use bc_types::player::{DevicesInfo, KeyLockQuality, MixSettingsPatch, OutputTarget, PlayerCommand};
+use bc_types::player::{DevicesInfo, KeyLockQuality, MixSettings, MixSettingsPatch, OutputTarget, PlayerCommand};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -26,6 +26,7 @@ pub fn AudioSection(prefs: PrefsHandle) -> impl IntoView {
     view! {
         <DevicesCard />
         <MixCard />
+        <DjMixCard />
         <WaveCard prefs=prefs />
     }
 }
@@ -92,6 +93,8 @@ fn DevicesCard() -> impl IntoView {
     let frames = Signal::derive(move || q.data.get().map(|i| i.buffer_frames.to_string()).unwrap_or_else(|| "-".into()));
     let xruns = Signal::derive(move || q.data.get().map(|i| i.xruns.to_string()).unwrap_or_else(|| "-".into()));
     let backend = Signal::derive(move || q.data.get().map(|i| i.backend.clone()).unwrap_or_default());
+    // A cue device that was asked for but did not open: previews fall back to the main output.
+    let cue_failed = Signal::derive(move || q.data.get().is_some_and(|i| i.target.cue_device.is_some() && i.cue_device.is_none() && i.backend.starts_with("cpal")));
 
     view! {
         <SysCard title="Output devices" icon="speaker" hint="The desktop engine plays through these devices. A cue device lets you pre-listen on headphones.">
@@ -108,6 +111,9 @@ fn DevicesCard() -> impl IntoView {
                     <div class="field"><label>"Buffer size"</label>
                         <Select options=buffers value=buffer aria_label="Buffer size" /></div>
                 </div>
+                <Show when=move || cue_failed.get()>
+                    <p class="sys-hint">"The cue device could not be opened, so previews play through the main output."</p>
+                </Show>
                 <p class="sys-hint faint">"Smaller buffers mean lower latency but risk dropouts (xruns). Changing the output restarts the audio stream."</p>
                 <div class="row gap wrap">
                     <Button variant=Variant::Primary icon="check" busy=busy disabled=Signal::derive(move || !dirty.get()) on_click=apply>"Apply"</Button>
@@ -181,6 +187,122 @@ fn MixCard() -> impl IntoView {
                             patch(MixSettingsPatch { key_lock_quality: Some(q), ..Default::default() })
                         }) />
                 </div>
+            </div>
+        </SysCard>
+    }
+}
+
+const STYLES: [(&str, &str); 6] = [
+    ("eq_blend", "DJ blend (EQ)"),
+    ("blend", "Crossfade"),
+    ("bass_swap", "Bass swap"),
+    ("filter", "Filter sweep"),
+    ("echo_out", "Echo out"),
+    ("cut", "Cut"),
+];
+const RETURNS: [(&str, &str); 5] = [
+    ("15", "Glide back over 15 s"),
+    ("30", "Glide back over 30 s"),
+    ("60", "Glide back over 1 min"),
+    ("120", "Glide back over 2 min"),
+    ("hold", "Stay at the matched tempo"),
+];
+
+/// A serde enum as its stored name (`eq_blend`, `phrase`, ...).
+fn tag<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_value(v).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
+}
+
+fn untag<T: serde::de::DeserializeOwned>(s: &str) -> Option<T> {
+    serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+}
+
+/// A control value bound to one mix setting: follows the player state, and sends
+/// a patch when the user changes it (only then: the state echoing back is a no-op).
+fn bind_mix(read: fn(&MixSettings) -> String, write: fn(&str) -> Option<MixSettingsPatch>) -> RwSignal<String> {
+    let player = use_player();
+    let v = RwSignal::new(player.state.with_untracked(|s| read(&s.mix_settings)));
+    Effect::new(move |_| v.set(player.state.with(|s| read(&s.mix_settings))));
+    Effect::new(move |_| {
+        let cur = v.get();
+        if player.state.with_untracked(|s| read(&s.mix_settings)) != cur
+            && let Some(p) = write(&cur) {
+                player.cmd(PlayerCommand::SetMixSettings { patch: p });
+            }
+    });
+    v
+}
+
+#[component]
+fn DjMixCard() -> impl IntoView {
+    let player = use_player();
+    let style = bind_mix(|m| tag(&m.transition), |v| Some(MixSettingsPatch { transition: Some(untag(v)?), ..Default::default() }));
+    let length = bind_mix(|m| m.length_beats.to_string(), |v| Some(MixSettingsPatch { length_beats: Some(v.parse().ok()?), ..Default::default() }));
+    let entry = bind_mix(|m| tag(&m.entry), |v| Some(MixSettingsPatch { entry: Some(untag(v)?), ..Default::default() }));
+    let quantise = bind_mix(|m| tag(&m.quantise), |v| Some(MixSettingsPatch { quantise: Some(untag(v)?), ..Default::default() }));
+    let ret = bind_mix(
+        |m| if m.hold_tempo { "hold".into() } else { format!("{}", m.glide_back_s.round() as i64) },
+        |v| Some(match v {
+            "hold" => MixSettingsPatch { hold_tempo: Some(true), ..Default::default() },
+            s => MixSettingsPatch { hold_tempo: Some(false), glide_back_s: Some(s.parse().ok()?), ..Default::default() },
+        }),
+    );
+    let flag = |f: fn(&MixSettings) -> bool| {
+        let v = RwSignal::new(player.state.with_untracked(|s| f(&s.mix_settings)));
+        Effect::new(move |_| v.set(player.state.with(|s| f(&s.mix_settings))));
+        v
+    };
+    let sync = flag(|m| m.sync);
+    let phase_lock = flag(|m| m.phase_lock);
+    let echo = flag(|m| m.echo);
+    let patch = move |p: MixSettingsPatch| player.cmd(PlayerCommand::SetMixSettings { patch: p });
+    let styles = Signal::derive(|| STYLES.iter().map(|(v, l)| SelectOption::new(*v, *l)).collect::<Vec<_>>());
+    let returns = Signal::derive(|| RETURNS.iter().map(|(v, l)| SelectOption::new(*v, *l)).collect::<Vec<_>>());
+    let length_hint = Signal::derive(move || {
+        let beats = length.get().parse::<f64>().unwrap_or(64.0);
+        format!("Measured in beats of the playing track: about {:.0} s at 128 BPM. A blend never starts before half-way through a track.", beats * 60.0 / 128.0)
+    });
+    view! {
+        <SysCard title="DJ mix" icon="mix" hint="How the player blends one track into the next when Mix is on.">
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Transition style"</div>
+                    <div class="desc faint">"DJ blend brings the next track in with its bass cut, swaps the basslines on a bar and then lets the old track's mids and highs go."</div></div>
+                <div style="width:190px"><Select options=styles value=style aria_label="Transition style" /></div>
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Blend length"</div>
+                    <div class="desc faint">{move || length_hint.get()}</div></div>
+                <SegmentedControl options=vec![("16", "4 bars"), ("32", "8 bars"), ("64", "16 bars"), ("128", "32 bars")] value=length />
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Bring the next track in"</div>
+                    <div class="desc faint">"Over the intro lines its drop up with the bass swap; at the drop starts it where the main part begins."</div></div>
+                <SegmentedControl options=vec![("intro", "Over the intro"), ("drop", "At the drop")] value=entry />
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Start the blend on"</div>
+                    <div class="desc faint">"Waits for the next beat, bar or 4-bar phrase of the playing track. Falls back to a bar when a phrase would come too late."</div></div>
+                <SegmentedControl options=vec![("beat", "Beat"), ("bar", "Bar"), ("phrase", "Phrase")] value=quantise />
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Beatmatch"</div>
+                    <div class="desc faint">"Play the next track at the current tempo when the two are within 6 % (half and double time count)."</div></div>
+                <Switch value=sync label="Beatmatch" on_change=Callback::new(move |v: bool| patch(MixSettingsPatch { sync: Some(v), ..Default::default() })) />
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Phase lock"</div>
+                    <div class="desc faint">"Keep the beats of both tracks locked together for the whole blend."</div></div>
+                <Switch value=phase_lock label="Phase lock" on_change=Callback::new(move |v: bool| patch(MixSettingsPatch { phase_lock: Some(v), ..Default::default() })) />
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"After the blend"</div>
+                    <div class="desc faint">"A beatmatched track eases back to its own tempo once the old one is gone."</div></div>
+                <div style="width:190px"><Select options=returns value=ret aria_label="Tempo after the blend" /></div>
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Echo out"</div>
+                    <div class="desc faint">"Throw the old track into an echo as it leaves. The DJ blend only echoes when the tempos can't be matched."</div></div>
+                <Switch value=echo label="Echo out" on_change=Callback::new(move |v: bool| patch(MixSettingsPatch { echo: Some(v), ..Default::default() })) />
             </div>
         </SysCard>
     }

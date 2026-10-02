@@ -15,6 +15,7 @@ use leptos_router::hooks::{use_navigate, use_query_map};
 use serde_json::Value;
 
 use crate::api;
+use crate::history::{self, Dir};
 use crate::data::{self, QuerySpec};
 use crate::ds::{self, Button, EmptyState, ErrorPanel, Icon, SelectOption, Size, Variant};
 use crate::logic::format::{format_count, format_duration_ms};
@@ -122,6 +123,42 @@ fn SavedQueries(
 // Browse feed (discover, infinite)
 // ---------------------------------------------------------------------------
 
+/// A feed as it was left, so back / forward returns to the same cards instead of a reload
+/// from page one (the shell then puts the scroll position back).
+#[derive(Clone)]
+struct FeedSnap {
+    items: Vec<ReleaseCardOut>,
+    cursor: Option<String>,
+    has_more: bool,
+    total: Option<i64>,
+}
+
+/// Snapshots of the most recent feeds, keyed by their browse query.
+const FEED_SNAPS: usize = 8;
+
+thread_local! {
+    static SNAPS: std::cell::RefCell<std::collections::VecDeque<(String, FeedSnap)>> = Default::default();
+}
+
+fn browse_key(b: &Browse) -> String {
+    query_key(&b.explore_params(""))
+}
+
+fn put_snap(key: String, snap: FeedSnap) {
+    SNAPS.with(|s| {
+        let mut s = s.borrow_mut();
+        s.retain(|(k, _)| *k != key);
+        s.push_back((key, snap));
+        while s.len() > FEED_SNAPS {
+            s.pop_front();
+        }
+    });
+}
+
+fn get_snap(key: &str) -> Option<FeedSnap> {
+    SNAPS.with(|s| s.borrow().iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()))
+}
+
 #[derive(Clone, Copy)]
 struct Feed {
     items: RwSignal<Vec<ReleaseCardOut>>,
@@ -150,7 +187,8 @@ fn use_feed(browse: Memo<Browse>, active: Signal<bool>, facets: Signal<Facets>) 
         }
         loading.set(true);
         let g = generation.get_value();
-        let pairs = browse.get_untracked().discover_pairs(&facets.get_untracked(), &cursor.get_untracked().unwrap_or_else(|| "*".into()), 48);
+        let b = browse.get_untracked();
+        let pairs = b.discover_pairs(&facets.get_untracked(), &cursor.get_untracked().unwrap_or_else(|| "*".into()), 48);
         spawn_local(async move {
             let res = api::get::<DiscoverOut>(&format!("/explore/discover{}", qs_pairs(&pairs))).await;
             if generation.try_get_value() != Some(g) {
@@ -168,6 +206,9 @@ fn use_feed(browse: Memo<Browse>, active: Signal<bool>, facets: Signal<Facets>) 
                     }
                     let _ = cursor.try_set(d.cursor);
                     let _ = has_more.try_set(!end);
+                    if let (Some(v), Some(c), Some(t)) = (items.try_get_untracked(), cursor.try_get_untracked(), total.try_get_untracked()) {
+                        put_snap(browse_key(&b), FeedSnap { items: v, cursor: c, has_more: !end, total: t });
+                    }
                 }
                 Err(e) => {
                     // No retry loop: the error panel offers one.
@@ -189,10 +230,28 @@ fn use_feed(browse: Memo<Browse>, active: Signal<bool>, facets: Signal<Facets>) 
         epoch.update(|e| *e += 1);
         more.run(());
     });
+    // Back / forward to a feed brings it back as it was; anything else starts it afresh.
+    let restore = move |snap: FeedSnap| {
+        generation.update_value(|g| *g += 1);
+        items.set(snap.items);
+        cursor.set(snap.cursor);
+        total.set(snap.total);
+        error.set(None);
+        loading.set(false);
+        has_more.set(snap.has_more);
+        epoch.update(|e| *e += 1);
+    };
+    let loc = leptos_router::hooks::use_location();
     Effect::new(move |_| {
-        let _ = browse.get();
-        if active.get() {
-            reset.run(());
+        let b = browse.get();
+        if !active.get() {
+            return;
+        }
+        let url = format!("{}?{}", loc.pathname.get_untracked(), loc.search.get_untracked());
+        let url = url.trim_end_matches('?');
+        match get_snap(&browse_key(&b)).filter(|_| crate::history::arrived_by_traversal(url)) {
+            Some(snap) => restore(snap),
+            None => reset.run(()),
         }
     });
     Feed { items, has_more, loading, error, total, epoch, more, reset }
@@ -264,7 +323,8 @@ pub fn ExplorePage() -> impl IntoView {
                 pairs.push((k.into(), v));
             }
         }
-        navigate(&format!("/explore{}", qs_pairs(&pairs)), NavigateOptions { replace: true, ..Default::default() });
+        // A new search or filter is a new page: back returns to the one before.
+        navigate(&format!("/explore{}", qs_pairs(&pairs)), NavigateOptions::default());
     });
 
     // Bandcamp's own filter vocabulary, so the dropdowns offer slugs discover actually matches.
@@ -467,9 +527,24 @@ pub fn ExploreBandPage() -> impl IntoView {
     }
 }
 
+/// Back to wherever this page was opened from (search results, the band page, the feed, a
+/// library page), as a browser's back would; to Explore when it was opened directly.
 #[component]
 fn Back() -> impl IntoView {
-    view! { <a class="xg-back" href="/explore"><Icon name="arrow-left" />"Explore"</a> }
+    let label = Memo::new(move |_| history::label(Dir::Back));
+    move || match label.get() {
+        Some(l) => {
+            let title = if l.is_empty() { "Back (Alt+\u{2190})".to_string() } else { format!("Back to {l} (Alt+\u{2190})") };
+            let text = if l.is_empty() { "Back".to_string() } else { l };
+            view! {
+                <button type="button" class="xg-back" title=title on:click=move |_| history::go(Dir::Back)>
+                    <Icon name="arrow-left" /><span>{text}</span>
+                </button>
+            }
+            .into_any()
+        }
+        None => view! { <a class="xg-back" href="/explore"><Icon name="arrow-left" /><span>"Explore"</span></a> }.into_any(),
+    }
 }
 
 #[component]
