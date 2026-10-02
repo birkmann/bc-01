@@ -732,6 +732,29 @@ pub struct DiscoverOut {
     pub total: Option<i64>,
 }
 
+/// One artist or label page met in the best-selling feed (`GET /explore/spotlight`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SpotlightBandOut {
+    pub name: String,
+    pub url: String,
+    pub location: Option<String>,
+    /// The page's own photo, else the cover of its best-selling release.
+    pub image_url: Option<String>,
+    /// How many of the feed's releases came from this page.
+    #[serde(default)]
+    pub releases: i64,
+}
+
+/// Who is selling on Bandcamp right now, split into artists and labels: a starting point for
+/// a library with nothing in it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SpotlightOut {
+    #[serde(default)]
+    pub artists: Vec<SpotlightBandOut>,
+    #[serde(default)]
+    pub labels: Vec<SpotlightBandOut>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct RosterArtistOut {
     pub name: String,

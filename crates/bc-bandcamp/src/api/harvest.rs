@@ -601,7 +601,9 @@ async fn get_identity(State(ctx): State<Arc<Ctx>>) -> ApiResult<Json<IdentitySta
         return Ok(Json(IdentityStatus { configured: false, detail: "No Bandcamp cookie stored.".into(), ..Default::default() }));
     };
     let fp = identity::fingerprint(&cookie);
-    Ok(Json(match sources::whoami(&ctx.client).await {
+    let who = sources::whoami(&ctx.client).await;
+    link_self_quietly(&ctx, &who).await;
+    Ok(Json(match who {
         Ok(who) => IdentityStatus {
             configured: true,
             valid: Some(true),
@@ -627,6 +629,16 @@ async fn get_identity(State(ctx): State<Arc<Ctx>>) -> ApiResult<Json<IdentitySta
     }))
 }
 
+/// Signed in: link the account as "me" (see `fans::link_self`). A failure only costs the Home
+/// shortcut, so it is logged, not reported.
+async fn link_self_quietly(ctx: &Arc<Ctx>, who: &Result<sources::Whoami, HarvestError>) {
+    if let Ok(who) = who
+        && let Err(e) = super::fans::link_self(ctx, who).await
+    {
+        tracing::warn!("could not link the signed-in account as me: {}", identity::redact(&e.to_string()));
+    }
+}
+
 async fn put_identity(State(ctx): State<Arc<Ctx>>, Json(body): Json<CookieRequest>) -> ApiResult<Json<IdentityStatus>> {
     store_identity(&ctx, &body.cookie).await.map(Json)
 }
@@ -646,7 +658,9 @@ pub(crate) async fn store_identity(ctx: &Arc<Ctx>, raw: &str) -> ApiResult<Ident
     // Other windows (and the download format card) refetch.
     ctx.bus.invalidate("identity", vec![]);
 
-    Ok(match sources::whoami(&ctx.client).await {
+    let who = sources::whoami(&ctx.client).await;
+    link_self_quietly(ctx, &who).await;
+    Ok(match who {
         Ok(who) => IdentityStatus {
             configured: true,
             valid: Some(true),

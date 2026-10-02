@@ -139,6 +139,53 @@ async fn discover_ends_when_the_cursor_repeats() {
     assert_eq!(body["cursor"], Value::Null, "a repeated cursor means the feed is exhausted");
 }
 
+// -- spotlight ----------------------------------------------------------------------------------------------
+
+fn seller(band: &str, url: &str, credit: &str, image: Option<i64>) -> Value {
+    json!({"item_url": format!("{url}/album/x?from=discover_page"), "title": "X", "band_name": band, "album_artist": credit,
+           "band_url": format!("{url}?from=discover_page"), "band_location": "Berlin, Germany",
+           "band_image": image.map(|i| json!({"image_id": i})), "primary_image": {"image_id": 99}})
+}
+
+#[tokio::test]
+async fn spotlight_splits_sellers_into_artists_and_labels_and_caches() {
+    let (site, _t, app) = rig("spotlight");
+    site.post_json(
+        "/api/discover/1/discover_web",
+        json!({"results": [
+            seller("Mogwai", "https://mogwai.bandcamp.com", "", Some(11)),
+            seller("Hyperdub", "https://hyperdub.bandcamp.com", "Burial", Some(12)),
+            seller("doseone", "https://doseone.bandcamp.com", "doseone, Fatboi Sharif & steel tipped dove", None),
+            seller("Godspeed You! Black Emperor", "https://gybe.bandcamp.com", "Godspeed You Black Emperor!", None),
+            // A page photo that is really a cover (`is_art`) takes the cover URL shape.
+            {"band_name": "BoC", "band_url": "https://boc.bandcamp.com", "band_image": {"image_id": 31, "is_art": true}},
+            // A second record from the same page: counted, not repeated; its own credit is enough to make a label.
+            seller("Hyperdub", "https://hyperdub.bandcamp.com", "", Some(12)),
+            seller("Cut Outs", "https://cutouts.bandcamp.com", "V/A", None),
+            {"title": "no band"},
+        ], "cursor": "c", "result_count": 6}),
+    );
+    let (status, body) = fakebc::get_json(&app, "/explore/spotlight").await;
+    assert_eq!(status.as_u16(), 200, "{body}");
+    let names = |k: &str| body[k].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(names("artists"), ["Mogwai", "doseone", "Godspeed You! Black Emperor", "BoC"], "a collaboration naming the page, or the same name punctuated differently, stays an artist");
+    assert_eq!(names("labels"), ["Hyperdub", "Cut Outs"], "feed order kept");
+    assert_eq!(body["labels"][0]["url"], "https://hyperdub.bandcamp.com", "?from= stripped");
+    assert_eq!(body["labels"][0]["releases"], 2);
+    assert_eq!(body["artists"][0]["image_url"], "https://f4.bcbits.com/img/11_23.jpg", "the page's own photo");
+    assert_eq!(body["artists"][1]["image_url"], "https://f4.bcbits.com/img/a99_23.jpg", "else the record's cover");
+    assert_eq!(body["artists"][3]["image_url"], "https://f4.bcbits.com/img/a31_23.jpg");
+    assert_eq!(body["artists"][0]["location"], "Berlin, Germany");
+
+    let payload = site.hits_to("POST", "/api/discover/1/discover_web")[0].json();
+    assert_eq!((payload["slice"].clone(), payload["tag_norm_names"].clone()), (json!("top"), json!([])), "best-selling, all genres");
+
+    fakebc::get_json(&app, "/explore/spotlight").await;
+    assert_eq!(site.count("/api/discover/1/discover_web"), 1, "a revisit is served from the cache");
+    fakebc::get_json(&app, "/explore/spotlight?genre=Jazz").await;
+    assert_eq!(site.hits_to("POST", "/api/discover/1/discover_web")[1].json()["tag_norm_names"], json!(["jazz"]), "each genre is its own entry");
+}
+
 // -- band -------------------------------------------------------------------------------------------------------
 
 #[tokio::test]

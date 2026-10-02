@@ -7,7 +7,7 @@
 //! routes hand URLs to the download queue, which stays the single path by which audio reaches
 //! disk.
 //!
-//! Routes: `/explore/{search,genres,discover,collectors,band,release,related,stream}`,
+//! Routes: `/explore/{search,genres,discover,spotlight,collectors,band,release,related,stream}`,
 //! `POST /explore/download`, `POST /explore/download/catalog`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -22,7 +22,7 @@ use bc_db::rusqlite::params_from_iter;
 use bc_jobs::ApiError;
 use bc_types::bandcamp::{
     BandOut, CollectorOut, CollectorsOut, DiscoverOut, ExploreReleaseOut, RelatedOut, RelatedSectionOut, RosterArtistOut,
-    SearchHitOut,
+    SearchHitOut, SpotlightBandOut, SpotlightOut,
 };
 use futures::future::join_all;
 
@@ -57,6 +57,7 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
         .route("/explore/search", get(search))
         .route("/explore/genres", get(genres))
         .route("/explore/discover", get(discover))
+        .route("/explore/spotlight", get(spotlight))
         .route("/explore/collectors", get(collectors))
         .route("/explore/band", get(band))
         .route("/explore/release", get(release))
@@ -138,6 +139,47 @@ async fn discover(State(ctx): State<Arc<Ctx>>, p: Params) -> ApiResult<DiscoverO
     let items: Vec<_> = page.items.iter().map(|r| (r.url.clone(), r.artist_name.clone(), r.title.clone())).collect();
     let known = known_releases(&ctx.db, &items).await?;
     Ok(Json(DiscoverOut { items: page.items.iter().map(|r| card(r, &known)).collect(), cursor: page.cursor, total: page.total }))
+}
+
+// -- spotlight -----------------------------------------------------------------------------
+
+/// Best-sellers move by the day, not the minute: Home asks on every visit to an empty library.
+const SPOTLIGHT_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+/// Per kind; one feed page of sixty releases holds ~55 pages, about a quarter of them labels.
+const SPOTLIGHT_PER_KIND: usize = 18;
+
+/// The last spotlight per genre (`""` for all), so a revisit costs no Bandcamp request.
+#[derive(Default)]
+struct SpotlightCache(parking_lot::Mutex<HashMap<String, (std::time::Instant, SpotlightOut)>>);
+
+/// Who is selling right now, as artists and labels to start digging from (Home on an empty
+/// library). One discover request, kept for hours; a failed refresh serves the stale copy.
+async fn spotlight(State(ctx): State<Arc<Ctx>>, p: Params) -> ApiResult<SpotlightOut> {
+    let genre = p.string("genre", "");
+    let cache = ctx.get::<SpotlightCache>().unwrap_or_else(|| {
+        let c = Arc::new(SpotlightCache::default());
+        ctx.put(c.clone());
+        c
+    });
+    let cached = cache.0.lock().get(&genre).cloned();
+    if let Some((at, out)) = &cached
+        && at.elapsed() < SPOTLIGHT_TTL
+    {
+        return Ok(Json(out.clone()));
+    }
+    let bands = match sources::fetch_spotlight(&ctx.client, Some(genre.as_str()).filter(|g| !g.is_empty())).await {
+        Ok(b) => b,
+        Err(e) => return cached.map(|(_, out)| Json(out)).ok_or_else(|| e.into()),
+    };
+    let mut out = SpotlightOut::default();
+    for b in bands {
+        let list = if b.is_label { &mut out.labels } else { &mut out.artists };
+        if list.len() < SPOTLIGHT_PER_KIND {
+            list.push(SpotlightBandOut { name: b.name, url: b.url, location: b.location, image_url: b.image_url, releases: b.releases });
+        }
+    }
+    cache.0.lock().insert(genre, (std::time::Instant::now(), out.clone()));
+    Ok(Json(out))
 }
 
 // -- collectors ----------------------------------------------------------------------------

@@ -22,6 +22,7 @@ mod logic;
 mod parts;
 mod rail;
 mod shelves;
+mod starter;
 mod welcome;
 
 use rail::{Favorites, Layout, StatTiles, TopTen};

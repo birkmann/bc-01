@@ -517,6 +517,75 @@ pub async fn discover_page(client: &BandcampClient, q: &DiscoverQuery, cursor: &
     })
 }
 
+// -- spotlight ---------------------------------------------------------------------------
+
+/// One artist or label page behind the best-selling feed.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SpotlightBand {
+    pub name: String,
+    pub url: String,
+    pub location: Option<String>,
+    pub image_url: Option<String>,
+    pub releases: i64,
+    pub is_label: bool,
+}
+
+/// Band photos are portraits of any shape; this size is a square crop big enough for a tile.
+const SPOTLIGHT_IMAGE_SIZE: u32 = 23;
+
+/// `fetch_spotlight`: one page of the best-selling feed (all genres unless one is named),
+/// folded into the pages that sell it.
+pub async fn fetch_spotlight(client: &BandcampClient, genre: Option<&str>) -> Result<Vec<SpotlightBand>> {
+    let mut q = DiscoverQuery::new();
+    q.slice = "top".into();
+    q.genre = genre.map(str::to_string);
+    let tag_names = q.tag_names();
+    let data = client.post_api(DISCOVER_PATH, &q.payload(&tag_names, 60, "*"), false, Some("https://bandcamp.com/")).await?;
+    Ok(spotlight_bands(data.get("results").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default()))
+}
+
+/// Group discover entries by the page that sells them, in feed order (best-selling first).
+/// The feed says nothing of labels, so the credits do: a page selling a record credited to
+/// someone it is not named in (another artist, `V/A`) is a label; a collaboration that
+/// names the page ("doseone, Fatboi Sharif & ...") is still the artist's own.
+pub fn spotlight_bands(results: &[Value]) -> Vec<SpotlightBand> {
+    let mut out: Vec<SpotlightBand> = Vec::new();
+    for e in results {
+        let raw = s(e.get("band_url"));
+        let name = s(e.get("band_name"));
+        if raw.is_empty() || name.trim().is_empty() {
+            continue;
+        }
+        let url = urls::normalise(&raw);
+        // Letters and digits only: "Godspeed You Black Emperor!" is the page "Godspeed You! Black Emperor".
+        let fold = |v: &str| v.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+        let credit = fold(&s(e.get("album_artist")));
+        let foreign = !credit.is_empty() && !credit.contains(&fold(&name));
+        let idx = match out.iter().position(|b| b.url == url) {
+            Some(i) => i,
+            None => {
+                // An image flagged `is_art` is a cover, whose URL carries the `a` prefix.
+                let image_url = |key: &str| {
+                    let im = e.get(key)?;
+                    let id = i(im.get("image_id"));
+                    if truthy(im.get("is_art")) { urls::build_art_url_sized(id, SPOTLIGHT_IMAGE_SIZE) } else { urls::build_band_image_url_sized(id, SPOTLIGHT_IMAGE_SIZE) }
+                };
+                out.push(SpotlightBand {
+                    name: name.trim().to_string(),
+                    url,
+                    location: Some(s(e.get("band_location"))).filter(|l| !l.trim().is_empty()),
+                    image_url: image_url("band_image").or_else(|| urls::build_art_url_sized(i(e.get("primary_image").and_then(|im| im.get("image_id"))), SPOTLIGHT_IMAGE_SIZE)),
+                    ..Default::default()
+                });
+                out.len() - 1
+            }
+        };
+        out[idx].releases += 1;
+        out[idx].is_label |= foreign;
+    }
+    out
+}
+
 // -- release / recommendations / collectors ------------------------------------------------
 
 /// Stream URLs are signed with an expiry, so a release fetched for playback cannot ride the

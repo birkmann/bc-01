@@ -1,13 +1,17 @@
 //! Home on an empty library: instead of a page of empty shelves, the ways music gets in.
 //! A folder on disk (added and scanned right here, with live progress), the Bandcamp
-//! account, or the old app's library, plus the discovery pages that work with nothing in.
+//! account, or the old app's library, plus Bandcamp itself (genres, who's selling, search)
+//! and the discovery pages that work with nothing in.
+//! Signed in to Bandcamp, the page leads with the account's own collection and wishlist.
 use bc_types::Accepted;
-use bc_types::bandcamp::IdentityStatus;
+use bc_types::bandcamp::{FanOut, IdentityStatus, WalkRequest};
 use bc_types::library::*;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos_router::hooks::use_navigate;
 
 use super::logic;
+use super::starter::BandcampDig;
 use crate::api;
 use crate::data::{QuerySpec, use_query, use_topic};
 use crate::ds::{BrandMark, Button, Icon, Meter, Variant};
@@ -20,6 +24,23 @@ pub fn Welcome(
     /// The library has music now: redraw Home as shelves.
     on_filled: Callback<()>,
 ) -> impl IntoView {
+    let id = use_query::<IdentityStatus>(|| Some(QuerySpec::new("/harvest/identity", &["identity"])));
+    let fans = use_query::<Vec<FanOut>>(|| Some(QuerySpec::new("/fans", &["fan"])));
+    let (id_data, fans_data) = (id.data, fans.data);
+    // Signed in and linked as "me" (the server does that on sign-in).
+    let me = Memo::new(move |_| {
+        let signed_in = id_data.get().is_some_and(|s| s.configured && s.valid != Some(false));
+        signed_in.then(|| fans_data.get().and_then(|f| f.iter().find(|x| x.is_self).cloned())).flatten()
+    });
+    move || match me.get() {
+        Some(fan) => view! { <BandcampStart fan=fan roots=roots.clone() on_filled=on_filled /> }.into_any(),
+        None => view! { <Ways roots=roots.clone() on_filled=on_filled /> }.into_any(),
+    }
+}
+
+/// The ways in, for someone not signed in to Bandcamp.
+#[component]
+fn Ways(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
     view! {
         <section class="hm-wel" aria-labelledby="hm-wel-title">
             <div class="hm-wel-hero">
@@ -34,15 +55,106 @@ pub fn Welcome(
                     <ImportWay />
                 </div>
             </div>
+            <DigLinks />
+        </section>
+    }
+}
+
+/// Signed in: start from the account's own collection or wishlist, the rest below.
+#[component]
+fn BandcampStart(fan: FanOut, roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
+    let name = fan.display_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| fan.username.clone());
+    view! {
+        <section class="hm-wel" aria-labelledby="hm-wel-title">
+            <div class="hm-wel-hero">
+                <div class="hm-wel-brand"><BrandMark size=28 /><span class="hm-eyebrow">"Welcome to bc"</span></div>
+                <h2 id="hm-wel-title" class="hm-wel-title">{format!("Hi {name}, where do you want to start?")}</h2>
+                <p class="hm-wel-lede">"Your library is still empty. Start with the music you bought on Bandcamp, or with the records on your wishlist."</p>
+            </div>
+            <div class="hm-wel-start">
+                <StartCard fan=fan.clone() tab="collection" icon="disc" title="Your collection" cta="Open collection"
+                    count=fan.collection_count unit="release you bought" units="releases you bought"
+                    text="Download them into your library in the format you picked, or stream them first." />
+                <StartCard fan=fan.clone() tab="wishlist" icon="heart" title="Your wishlist" cta="Open wishlist"
+                    count=fan.wishlist_count unit="release you wished for" units="releases you wished for"
+                    text="Listen through them, keep what you love and see what is already on disk." />
+            </div>
             <div class="hm-wel-dig">
-                <h3 class="hm-wel-dig-title">"Or go digging first"</h3>
-                <div class="hm-wel-links">
-                    <DigLink to="/explore" icon="compass" title="Explore" text="Browse Bandcamp by genre, place and what\u{2019}s selling" />
-                    <DigLink to="/feed" icon="rss" title="Feed" text="New releases from the artists and labels you follow" />
-                    <DigLink to="/fans" icon="users" title="Fans" text="Follow collectors whose taste you trust" />
+                <h3 class="hm-wel-dig-title">"Other ways in"</h3>
+                <div class="hm-wel-ways">
+                    <FolderWay roots=roots on_filled=on_filled />
+                    <div class="hm-wel-side"><ImportWay /></div>
                 </div>
             </div>
+            <DigLinks />
         </section>
+    }
+}
+
+/// One of the account's lists. Opening a list that was never walked walks it first, without
+/// queueing anything: the list page shows it filling in and downloading stays a choice.
+#[component]
+fn StartCard(
+    fan: FanOut,
+    tab: &'static str,
+    icon: &'static str,
+    title: &'static str,
+    cta: &'static str,
+    count: Option<i64>,
+    unit: &'static str,
+    units: &'static str,
+    text: &'static str,
+) -> impl IntoView {
+    let navigate = use_navigate();
+    let busy = RwSignal::new(false);
+    let walked = fan.tabs.get(tab).is_some_and(|t| t.items > 0) || fan.walk.as_ref().is_some_and(|w| w.running);
+    let id = fan.id;
+    let open = move |_| {
+        let navigate = navigate.clone();
+        busy.set(true);
+        spawn_local(async move {
+            if !walked {
+                let body = WalkRequest { queue_new: Some(false), tabs: Some(vec![tab.to_string()]) };
+                if let Err(e) = api::post::<_, FanOut>(&format!("/fans/{id}/walk"), &body).await {
+                    crate::ds::toast_err(&e.message());
+                }
+            }
+            let _ = busy.try_set(false);
+            navigate(&format!("/fans/{id}?list={tab}"), Default::default());
+        });
+    };
+    let sub = match count {
+        Some(n) => format!("{} {}. {text}", format_count(n), if n == 1 { unit } else { units }),
+        None => text.to_string(),
+    };
+    view! {
+        <div class="hm-wel-card primary hm-wel-start-card">
+            <div class="hm-wel-card-head">
+                <span class="hm-wel-icon"><Icon name=icon /></span>
+                <div>
+                    <h3 class="hm-wel-card-title">{title}</h3>
+                    <p class="faint hm-wel-card-sub">{sub}</p>
+                </div>
+            </div>
+            <div class="hm-wel-actions">
+                <Button variant=Variant::Primary icon="arrow-right" busy=busy on_click=open>{cta}</Button>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn DigLinks() -> impl IntoView {
+    view! {
+        <BandcampDig />
+        <div class="hm-wel-dig">
+            <h3 class="hm-wel-dig-title">"More ways to dig"</h3>
+            <div class="hm-wel-links">
+                <DigLink to="/explore" icon="compass" title="Explore" text="Browse Bandcamp by genre, place and what\u{2019}s selling" />
+                <DigLink to="/feed" icon="rss" title="Feed" text="New releases from the artists and labels you follow" />
+                <DigLink to="/fans" icon="users" title="Fans" text="Follow collectors whose taste you trust" />
+            </div>
+        </div>
     }
 }
 

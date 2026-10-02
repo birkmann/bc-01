@@ -56,6 +56,31 @@ async fn fan_out_for(ctx: &Arc<Ctx>, fan_id: i64) -> ApiResult<FanOut> {
     out.ok_or_else(|| ApiError::not_found("no such wishlist"))
 }
 
+/// The signed-in account becomes the self fan ("me"), so Home and Fans can open its collection
+/// and wishlist straight away. Called after every successful sign-in check; a fan page is only
+/// fetched while the account is not linked yet. Nothing is walked or queued. Signing in as
+/// someone else moves "me" to that account.
+pub(crate) async fn link_self(ctx: &Arc<Ctx>, who: &sources::Whoami) -> Result<(), HarvestError> {
+    let Some(url) = who.url.clone().or_else(|| who.username.as_ref().map(|u| format!("https://bandcamp.com/{u}"))) else {
+        return Ok(());
+    };
+    let canonical = fans::coerce_fan_url(&url)?;
+    let username = fans::username_from_url(&canonical);
+    if dbr(&ctx.db, move |c| Ok(fans::self_fan(c)?.is_some_and(|f| f.username == username))).await? {
+        return Ok(());
+    }
+    // The counts on the Home cards come from the fan page; without them the cards just say less.
+    let probe = walker(ctx).source().probe_fan(&canonical).await.ok();
+    fans::dbw(&ctx.db, move |tx| {
+        let fan = fans::create_fan(tx, &canonical, true, probe.as_ref())?;
+        tx.execute("UPDATE fans SET is_self = (id = ?1)", [fan.id])?;
+        Ok(())
+    })
+    .await?;
+    ctx.bus.invalidate("fan", vec![]);
+    Ok(())
+}
+
 async fn require_fan(ctx: &Arc<Ctx>, fan_id: i64) -> ApiResult<fans::FanRow> {
     dbr(&ctx.db, move |c| fans::get_fan(c, fan_id))
         .await?
