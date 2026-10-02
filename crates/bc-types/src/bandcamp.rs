@@ -373,6 +373,37 @@ pub struct IdentityStatus {
     pub detail: String,
 }
 
+/// `GET /desktop`: what the desktop app around the server can do for this caller.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DesktopInfo {
+    /// `POST /desktop/bandcamp-login` opens Bandcamp's sign-in page in a window on this machine.
+    pub bandcamp_login: bool,
+}
+
+/// Asks the desktop app to open the sign-in window (server to desktop, payload `{}`).
+pub const TOPIC_BANDCAMP_LOGIN_REQUEST: &str = "desktop.bandcamp_login";
+/// Progress of the sign-in window (desktop to UI), payload [`BandcampLoginEvent`].
+pub const TOPIC_BANDCAMP_LOGIN: &str = "bandcamp.login";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BandcampLoginState {
+    /// The window is open and waiting for the user to sign in.
+    Open,
+    /// Signed in; the cookie is stored (the `identity` query refetches).
+    SignedIn,
+    /// The window was closed before signing in.
+    Closed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BandcampLoginEvent {
+    pub state: BandcampLoginState,
+    #[serde(default)]
+    pub detail: String,
+}
+
 /// `GET /harvest/health`
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct HarvestHealth {
