@@ -5,3 +5,4 @@ e2e/node_modules
 *.dmg
 /packaging/appimage/tools/
 *.AppImage
+.claude/worktrees/
