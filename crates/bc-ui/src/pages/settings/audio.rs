@@ -310,8 +310,9 @@ fn DjMixCard() -> impl IntoView {
 
 #[component]
 fn WaveCard(prefs: PrefsHandle) -> impl IntoView {
-    let _ = prefs;
     let style = crate::prefs::wave_style_pref();
+    let markers = RwSignal::new(prefs.prefs.with_untracked(|p| p.player_wave_markers));
+    Effect::new(move |_| markers.set(prefs.prefs.with(|p| p.player_wave_markers)));
     let player_style = crate::prefs::bind_pref(|p| p.player_wave_style.clone(), |p, v| p.player_wave_style = v);
     let bars = preview_bars(72);
     let bars2 = bars.clone();
@@ -322,6 +323,12 @@ fn WaveCard(prefs: PrefsHandle) -> impl IntoView {
             <div class="pref-row">
                 <div class="grow"><div class="name">"Player bar"</div></div>
                 <SegmentedControl options=vec![("bars", "Bars"), ("rgb", "Spectral")] value=player_style />
+            </div>
+            <div class="pref-row">
+                <div class="grow"><div class="name">"Cue markers in the player bar"</div>
+                    <div class="desc faint">"Show cue, mix-in and mix-out points on the player-bar waveform while DJ mix is on. They are never shown outside DJ mix."</div></div>
+                <Switch value=markers label="Cue markers in the player bar"
+                    on_change=Callback::new(move |v: bool| prefs.prefs.update(|p| p.player_wave_markers = v)) />
             </div>
             <div class="pref-row">
                 <div class="grow"><div class="name">"Deck and set planner"</div></div>

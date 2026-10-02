@@ -125,8 +125,10 @@ pub fn HomePage() -> impl IntoView {
                             <span class="hide-sm">"Refresh"</span>
                             {move || fresh.get().then(|| view! { <span class="hm-dot" aria-hidden="true"></span> })}
                         </button>
-                        <Button variant=Variant::Primary icon="play" busy=Signal::derive(move || starting.get() == Some(false)) title="Play the library" on_click=move |_| st1(false)><span class="hide-sm">"Play library"</span></Button>
-                        <Button icon="shuffle" title="Shuffle the whole library" busy=Signal::derive(move || starting.get() == Some(true)) on_click=move |_| st2(true)><span class="hide-sm">"Shuffle"</span></Button>
+                        <div class="hm-libplay" role="group" aria-label="Whole library">
+                            <Button icon="play" busy=Signal::derive(move || starting.get() == Some(false)) title="Play the whole library" on_click=move |_| st1(false)><span class="hide-sm">"Play library"</span></Button>
+                            <Button icon="shuffle" title="Shuffle the whole library" busy=Signal::derive(move || starting.get() == Some(true)) on_click=move |_| st2(true) />
+                        </div>
                     }
                 }) />
             <div class="page-scroll hm">

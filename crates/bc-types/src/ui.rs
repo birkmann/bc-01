@@ -39,6 +39,9 @@ pub struct UiPrefs {
     /// Player-bar waveform: "bars" (default) | "rgb" (spectral).
     #[serde(default = "default_player_wave")]
     pub player_wave_style: String,
+    /// Player-bar waveform: show cue, mix-in and mix-out markers while DJ mix is on.
+    #[serde(default = "default_true")]
+    pub player_wave_markers: bool,
     #[serde(default)]
     pub album_art_accent: bool,
     #[serde(default)]
@@ -55,12 +58,15 @@ pub struct UiPrefs {
 fn default_player_wave() -> String {
     "bars".into()
 }
+fn default_true() -> bool {
+    true
+}
 fn default_sidebar_stats() -> String {
     "off".into()
 }
 impl Default for UiPrefs {
     fn default() -> Self {
-        Self { waveform_style: "rgb".into(), player_wave_style: default_player_wave(), album_art_accent: false, reduce_motion: false, row_waveforms: false, tag_colors: false, sidebar_stats: default_sidebar_stats() }
+        Self { waveform_style: "rgb".into(), player_wave_style: default_player_wave(), player_wave_markers: true, album_art_accent: false, reduce_motion: false, row_waveforms: false, tag_colors: false, sidebar_stats: default_sidebar_stats() }
     }
 }
 
@@ -73,5 +79,6 @@ mod tests {
         assert_eq!(p.player_wave_style, "bars");
         assert_eq!(p.waveform_style, "mono");
         assert_eq!(p.sidebar_stats, "off");
+        assert!(p.player_wave_markers);
     }
 }

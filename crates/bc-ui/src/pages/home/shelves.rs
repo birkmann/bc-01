@@ -266,7 +266,7 @@ fn DiscoveryPanel(#[prop(into)] title: String, icon: &'static str, items: Vec<Tr
             <div class="hm-panel-head">
                 <h3 class="hm-panel-title"><span class="hm-panel-icon"><Icon name=icon /></span>{title}</h3>
                 <div class="hm-panel-btns">
-                    <button type="button" class="hm-pill primary" on:click=move |_| play_items(player, &a1, 0, None, true)><Icon name="play" size=11 />"Play all"</button>
+                    <button type="button" class="hm-pill" on:click=move |_| play_items(player, &a1, 0, None, true)><Icon name="play" size=11 />"Play"</button>
                     <button type="button" class="hm-pill" on:click=move |_| { let mut d = (*a2).clone(); shuffle_in_place(&mut d); play_items(player, &d, 0, None, true) }><Icon name="shuffle" size=11 />"Shuffle"</button>
                 </div>
             </div>

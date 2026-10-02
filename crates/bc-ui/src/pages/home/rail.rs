@@ -106,7 +106,7 @@ pub fn TopTen(shelves: Shelves) -> impl IntoView {
                 <h2 class="hm-card-title"><span class="hm-panel-icon"><Icon name="activity" /></span>"Top 10"</h2>
                 {move || (!entries.get().is_empty()).then(|| view! {
                     <div class="hm-panel-btns">
-                        <button type="button" class="hm-pill primary" on:click=move |_| play_items(player, &tracks.get_untracked(), 0, None, false)><Icon name="play" size=11 />"Play all"</button>
+                        <button type="button" class="hm-pill" title="Play the Top 10" aria-label="Play the Top 10" on:click=move |_| play_items(player, &tracks.get_untracked(), 0, None, false)><Icon name="play" size=11 />"Play"</button>
                         <button type="button" class="lib-roundbtn small" aria-label="Shuffle the Top 10" title="Shuffle the Top 10" on:click=move |_| {
                             let mut d = tracks.get_untracked(); shuffle_in_place(&mut d); play_items(player, &d, 0, None, true)
                         }><Icon name="shuffle" size=12 /></button>
@@ -244,7 +244,7 @@ fn FavoritesControls() -> impl IntoView {
     };
     view! {
         <div class="hm-panel-btns">
-            <button type="button" class="hm-pill primary" disabled=move || busy.get().is_some() on:click=move |_| a(false)><Icon name="play" size=11 />"Play all"</button>
+            <button type="button" class="hm-pill" title="Play the favourites" aria-label="Play the favourites" disabled=move || busy.get().is_some() on:click=move |_| a(false)><Icon name="play" size=11 />"Play"</button>
             <button type="button" class="lib-roundbtn small" aria-label="Shuffle the favourites" title="Shuffle the favourites" disabled=move || busy.get().is_some() on:click=move |_| b(true)><Icon name="shuffle" size=12 /></button>
             <button type="button" class="hm-pill" disabled=move || saving.get() title="Freeze the pinned artists, labels and tags into a playlist" on:click=save><Icon name="list" size=11 />"Save"</button>
         </div>

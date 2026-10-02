@@ -212,13 +212,13 @@ pub fn PlayerBar() -> impl IntoView {
     let hover = RwSignal::new(None::<f64>);
     let has_wave = RwSignal::new(false);
     let prefs = crate::prefs::use_prefs();
-    let mixing = Signal::derive(move || st.with(|s| s.mix));
+    // cues, mix-in and mix-out only mean something while DJ mix is on, and Settings can hide them
+    let mixing = Signal::derive(move || st.with(|s| s.mix) && prefs.prefs.with(|p| p.player_wave_markers));
     let markers = Signal::derive(move || {
         let mut m = Markers::default();
         if let Some(info) = music.get() {
             m.grid = info.grid.clone();
             m.chapter_ticks = info.grid.is_some();
-            // cues, mix-in and mix-out only mean something while DJ mix is on
             if mixing.get() {
                 m.cues = info.cues.clone();
             }
