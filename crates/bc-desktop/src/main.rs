@@ -13,6 +13,10 @@
 //! * Closing the window quits, unless music is playing; then it keeps playing in the background.
 //!   Reopen via the dock icon or the tray.
 //! * Shows notifications when downloads finish.
+//! * Signs in to Bandcamp: Settings asks for a window on Bandcamp's own login page (a WKWebView
+//!   window on macOS, a throwaway browser profile on Linux, `login.rs`); once the page has set the
+//!   `identity` cookie it is stored like a pasted one and the window closes. bc never sees the
+//!   password.
 //!
 //! Why not an embedded WebKitGTK view on Linux (Tauri, or plain webkit2gtk)? webkit2gtk 2.52 was
 //! not usable on Wayland + NVIDIA. Symbolised core dumps on 2026-10-01 showed three failures:
@@ -26,6 +30,8 @@
 
 #[cfg(not(target_os = "macos"))]
 mod browser;
+#[cfg(not(target_os = "macos"))]
+mod login;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -35,6 +41,7 @@ use std::time::Duration;
 
 use bc_core::Config;
 use bc_server::{RunningServer, ServerOptions};
+use bc_types::bandcamp::{BandcampLoginEvent, BandcampLoginState, TOPIC_BANDCAMP_LOGIN, TOPIC_BANDCAMP_LOGIN_REQUEST};
 use bc_types::player::PlayerStatus;
 
 /// With the window closed and nothing playing for this long, the app quits.
@@ -109,6 +116,63 @@ impl Core {
     }
 }
 
+/// Where the sign-in window starts.
+const BANDCAMP_LOGIN_URL: &str = "https://bandcamp.com/login";
+
+/// The Cookie header for Bandcamp from a sign-in window's `(domain, name, value)` cookies, once
+/// it holds `identity` (only a signed-in session has it). The companion cookies go along, as
+/// with a pasted header.
+fn bandcamp_cookie_header<'a>(cookies: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>) -> Option<String> {
+    let pairs: Vec<String> = cookies
+        .into_iter()
+        .filter(|(domain, _, value)| {
+            let d = domain.trim_start_matches('.');
+            (d == "bandcamp.com" || d.ends_with(".bandcamp.com")) && !value.is_empty()
+        })
+        .map(|(_, name, value)| format!("{name}={value}"))
+        .collect();
+    pairs.iter().any(|p| p.starts_with("identity=")).then(|| pairs.join("; "))
+}
+
+impl Core {
+    /// Tell the Settings page how the sign-in window is doing.
+    fn login_event(&self, state: BandcampLoginState, detail: impl Into<String>) {
+        self.server.state.bus.publish(TOPIC_BANDCAMP_LOGIN, &BandcampLoginEvent { state, detail: detail.into() });
+    }
+
+    /// Store a cookie header from the sign-in window. `true` once it is stored and Bandcamp did
+    /// not reject it (the window may close); `false` keeps the window waiting.
+    async fn try_login_cookie(&self, header: String) -> bool {
+        let Some(bc) = &self.server.state.services.bandcamp else { return false };
+        match bc.store_cookie(&header).await {
+            Ok(s) if s.valid == Some(false) => false,
+            Ok(s) => {
+                let detail = s.username.map(|u| format!("Signed in as {u}")).unwrap_or(s.detail);
+                self.login_event(BandcampLoginState::SignedIn, detail);
+                true
+            }
+            Err(e) => {
+                tracing::warn!("sign-in cookie not stored: {e}");
+                false
+            }
+        }
+    }
+}
+
+/// Run `open` whenever Settings asks for the sign-in window. Needs a tokio runtime context.
+fn on_login_request(core: &Core, open: impl Fn() + Send + 'static) {
+    let mut rx = core.server.state.bus.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(ev) if ev.topic == TOPIC_BANDCAMP_LOGIN_REQUEST => open(),
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => break,
+            }
+        }
+    });
+}
+
 /// Keep `Core::player` in step with the engine's `player.state` events.
 fn spawn_player_watch(core: Arc<Core>) {
     let mut rx = core.server.state.bus.subscribe();
@@ -163,16 +227,24 @@ fn spawn_notifier(server: Arc<RunningServer>) {
     });
 }
 
+fn server_options() -> ServerOptions {
+    #[cfg(target_os = "macos")]
+    let bandcamp_login = true;
+    #[cfg(not(target_os = "macos"))]
+    let bandcamp_login = login::available();
+    ServerOptions { bandcamp_login, ..ServerOptions::from_env() }
+}
+
 async fn start_server() -> anyhow::Result<RunningServer> {
     // Prefer a stable port (the window's origin keys its local storage); fall back to any port.
     let config = Config::from_env();
-    match bc_server::start(config.clone(), ServerOptions::from_env()).await {
+    match bc_server::start(config.clone(), server_options()).await {
         Ok(s) => Ok(s),
         Err(e) => {
             tracing::warn!("port {} unavailable ({e}); using a free port", config.port);
             let mut config = config;
             config.port = 0;
-            bc_server::start(config, ServerOptions::from_env()).await
+            bc_server::start(config, server_options()).await
         }
     }
 }
@@ -228,4 +300,25 @@ fn shutdown() -> ! {
 fn tracing_subscriber_init() {
     // bc-server installs its own subscriber when run via `bc serve`; the desktop app only needs
     // warnings on stderr, which the default (no subscriber) drops. Keep it dependency-free.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cookie_header_needs_identity_and_keeps_only_bandcamp() {
+        assert_eq!(bandcamp_cookie_header([(".bandcamp.com", "client_id", "1")]), None);
+        assert_eq!(
+            bandcamp_cookie_header([
+                (".bandcamp.com", "client_id", "1"),
+                ("www.google.com", "NID", "x"),
+                ("bandcamp.com", "identity", "7%09abc"),
+                (".bandcamp.com", "session", ""),
+            ])
+            .as_deref(),
+            Some("client_id=1; identity=7%09abc")
+        );
+        assert_eq!(bandcamp_cookie_header([("notbandcamp.com", "identity", "x")]), None);
+    }
 }

@@ -777,6 +777,7 @@ dependencies = [
  "libc",
  "muda",
  "notify-rust",
+ "rusqlite",
  "serde_json",
  "tao",
  "tokio",

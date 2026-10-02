@@ -628,7 +628,13 @@ async fn get_identity(State(ctx): State<Arc<Ctx>>) -> ApiResult<Json<IdentitySta
 }
 
 async fn put_identity(State(ctx): State<Arc<Ctx>>, Json(body): Json<CookieRequest>) -> ApiResult<Json<IdentityStatus>> {
-    let cookie = identity::normalise_cookie(&body.cookie);
+    store_identity(&ctx, &body.cookie).await.map(Json)
+}
+
+/// Store a cookie (a bare `identity=...` or a whole Cookie header) and check it with Bandcamp.
+/// Shared by the paste field and the desktop app's sign-in window.
+pub(crate) async fn store_identity(ctx: &Arc<Ctx>, raw: &str) -> ApiResult<IdentityStatus> {
+    let cookie = identity::normalise_cookie(raw);
     if !identity::has_identity(&cookie) {
         return Err(ApiError::bad_request(
             "That does not contain an `identity` cookie. Copy the whole Cookie header from a logged-in bandcamp.com request in your browser's network tab.",
@@ -637,8 +643,10 @@ async fn put_identity(State(ctx): State<Arc<Ctx>>, Json(body): Json<CookieReques
     let cookies = ctx.cookies.clone();
     let fp = tokio::task::spawn_blocking(move || cookies.store(&cookie)).await.map_err(|e| ApiError::internal(e.to_string()))?;
     ctx.reload_cookie();
+    // Other windows (and the download format card) refetch.
+    ctx.bus.invalidate("identity", vec![]);
 
-    Ok(Json(match sources::whoami(&ctx.client).await {
+    Ok(match sources::whoami(&ctx.client).await {
         Ok(who) => IdentityStatus {
             configured: true,
             valid: Some(true),
@@ -661,13 +669,14 @@ async fn put_identity(State(ctx): State<Arc<Ctx>>, Json(body): Json<CookieReques
             detail: format!("Stored, but unverified: {}", identity::redact(&e.to_string())),
             ..Default::default()
         },
-    }))
+    })
 }
 
 async fn delete_identity(State(ctx): State<Arc<Ctx>>) -> ApiResult<StatusCode> {
     let cookies = ctx.cookies.clone();
     tokio::task::spawn_blocking(move || cookies.clear()).await.map_err(|e| ApiError::internal(e.to_string()))?;
     ctx.reload_cookie();
+    ctx.bus.invalidate("identity", vec![]);
     Ok(StatusCode::NO_CONTENT)
 }
 

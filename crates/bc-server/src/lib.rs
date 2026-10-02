@@ -5,6 +5,7 @@
 //! they publish their `XService`.
 
 pub mod auth;
+pub mod desktop;
 pub mod error;
 pub mod health;
 pub mod services;
@@ -74,6 +75,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(health::router())
         .merge(ui_state::router())
         .merge(auth::router())
+        .merge(desktop::router())
         .route("/ws", get(ws::upgrade))
         .with_state(state.clone());
     let api: Router = own

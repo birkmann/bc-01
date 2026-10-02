@@ -111,7 +111,7 @@ pub fn FansPage() -> impl IntoView {
                         PanelState::Loading => view! { <div class="fn-skel"><Skeleton height="120px" /><Skeleton height="40px" /></div> }.into_any(),
                         PanelState::Empty => view! {
                             <EmptyState title="Follow a fan to start" icon="users"
-                                hint="Paste a Bandcamp profile, wishlist or collection link, or just a username. Your own goes first: walking it recognises what you already have and queues only the rest. Public lists need no Bandcamp cookie." />
+                                hint="Paste a Bandcamp profile, wishlist or collection link, or just a username. Your own goes first: walking it recognises what you already have and queues only the rest. Public lists work without signing in." />
                         }.into_any(),
                     }}
                 </div>

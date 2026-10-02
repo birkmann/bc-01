@@ -1,6 +1,8 @@
-//! Settings > Downloads and Bandcamp: download format, disk guard, cookie (write-only), fans and
-//! label resolution.
-use bc_types::bandcamp::{CookieRequest, FanOut, IdentityStatus, LabelResolveStatus};
+//! Settings > Downloads and Bandcamp: download format, disk guard, Bandcamp sign-in (a window in
+//! the desktop app, else a pasted cookie; write-only either way), fans and label resolution.
+use bc_types::bandcamp::{
+    BandcampLoginEvent, BandcampLoginState, CookieRequest, DesktopInfo, FanOut, IdentityStatus, LabelResolveStatus, TOPIC_BANDCAMP_LOGIN,
+};
 use bc_types::jobs::{DiskIn, DiskOut, DownloadFormatIn, DownloadFormatOut};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -17,7 +19,7 @@ pub fn BandcampSection() -> impl IntoView {
     view! {
         <DownloadFormat />
         <DiskGuard />
-        <Cookie />
+        <Account />
         <Fans />
     }
 }
@@ -68,7 +70,7 @@ fn DownloadFormat() -> impl IntoView {
                     <Button variant=Variant::Primary busy=busy disabled=Signal::derive(move || !dirty.get()) on_click=save>"Save"</Button>
                 </div>
                 <Show when=move || q.data.get().is_some_and(|d| d.format.is_some() && !d.cookie)>
-                    <p class="sys-hint">"Paste your Bandcamp cookie below: without it bc cannot see what you bought, so downloads stay on the public stream."</p>
+                    <p class="sys-hint">"Sign in to Bandcamp below: without it bc cannot see what you bought, so downloads stay on the public stream."</p>
                 </Show>
             </Show>
         </SysCard>
@@ -150,8 +152,108 @@ fn DiskGuard() -> impl IntoView {
 }
 
 #[component]
-fn Cookie() -> impl IntoView {
+fn Account() -> impl IntoView {
     let q = qh(use_query::<IdentityStatus>(|| Some(QuerySpec::new("/harvest/identity", &["identity"]))));
+    let desktop = qh(use_query::<DesktopInfo>(|| Some(QuerySpec::new("/desktop", &[]))));
+    // Only the desktop app can open a sign-in window (and only for the machine it runs on); a
+    // browser elsewhere pastes the cookie.
+    let can_window = Signal::derive(move || desktop.data.get().is_some_and(|d| d.bandcamp_login));
+    let signed_in = Signal::derive(move || q.data.get().is_some_and(|s| s.configured && s.valid != Some(false)));
+    let expired = Signal::derive(move || q.data.get().is_some_and(|s| s.configured && s.valid == Some(false)));
+    let waiting = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+    let paste_open = RwSignal::new(false);
+
+    use_topic::<BandcampLoginEvent>(TOPIC_BANDCAMP_LOGIN, move |e| match e.state {
+        BandcampLoginState::Open => waiting.set(true),
+        BandcampLoginState::SignedIn => {
+            waiting.set(false);
+            paste_open.set(false);
+            toast_ok(if e.detail.is_empty() { "Signed in to Bandcamp" } else { &e.detail });
+            q.refetch();
+        }
+        BandcampLoginState::Closed => waiting.set(false),
+        BandcampLoginState::Failed => {
+            waiting.set(false);
+            error.set(Some(e.detail));
+        }
+    });
+    let sign_in = move |_| {
+        error.set(None);
+        waiting.set(true);
+        spawn_local(async move {
+            if let Err(e) = api::call_json("POST", "/desktop/bandcamp-login", &serde_json::json!({})).await {
+                waiting.set(false);
+                error.set(Some(e.message()));
+            }
+        });
+    };
+    let sign_out = move |_| {
+        spawn_local(async move {
+            if confirm("Sign out of Bandcamp?", "bc forgets the login. Downloads of what you bought fall back to the public stream until you sign in again.", "Sign out", true).await {
+                match api::call("DELETE", "/harvest/identity").await {
+                    Ok(()) => q.refetch(),
+                    Err(e) => toast_err(&e.message()),
+                }
+            }
+        });
+    };
+    let sign_in_button = move || view! {
+        <Button variant=Variant::Primary icon="key" busy=waiting on_click=sign_in>
+            {move || if waiting.get() { "Waiting for you to sign in" } else if expired.get() { "Sign in again" } else { "Sign in to Bandcamp" }}
+        </Button>
+    };
+    view! {
+        <SysCard title="Bandcamp account" icon="key"
+            hint="Sign in to download what you bought in full quality and to sync your own collection and wishlist. Everything else works without an account.">
+            <Show when=move || q.data.get().is_none()><Skeleton height="40px" /></Show>
+            <Show when=move || signed_in.get()>
+                {move || q.data.get().map(|s| view! {
+                    <div class="cookie-state">
+                        <Icon name="user" />
+                        <span>{s.username.clone().map(|u| format!("Signed in as {u}")).unwrap_or_else(|| "Signed in".into())}</span>
+                        {(s.valid.is_none()).then(|| view! { <StatusBadge tone=Tone::Neutral label="Not checked" /> })}
+                        <span class="spacer"></span>
+                        <Button size=Size::Sm variant=Variant::Ghost on_click=sign_out>"Sign out"</Button>
+                    </div>
+                    {(s.valid.is_none() && !s.detail.is_empty()).then(|| view! { <p class="sys-hint faint">{s.detail.clone()}</p> })}
+                })}
+            </Show>
+            <Show when=move || q.data.get().is_some() && !signed_in.get()>
+                <Show when=move || expired.get()>
+                    <div class="cookie-state">
+                        <Icon name="user" />
+                        <span>"Your Bandcamp sign-in has expired."</span>
+                        <span class="spacer"></span>
+                        <Button size=Size::Sm variant=Variant::Ghost on_click=sign_out>"Sign out"</Button>
+                    </div>
+                </Show>
+                <Show when=move || can_window.get()>
+                    <div class="row gap wrap">
+                        {sign_in_button}
+                        <Show when=move || !paste_open.get()>
+                            <Button size=Size::Sm variant=Variant::Ghost on_click=move |_| paste_open.set(true)>"Paste a cookie instead"</Button>
+                        </Show>
+                    </div>
+                    <p class="sys-hint">{move || if waiting.get() {
+                        "Sign in in the Bandcamp window. It closes by itself once you are in; close it yourself to cancel."
+                    } else {
+                        "Opens Bandcamp\u{2019}s own sign-in page in a separate window. bc never sees your password."
+                    }}</p>
+                </Show>
+                <Notice text=error />
+                <Show when=move || paste_open.get() || desktop.data.get().is_some_and(|d| !d.bandcamp_login)>
+                    <PasteCookie />
+                </Show>
+            </Show>
+            <p class="sys-hint faint">"bc keeps only Bandcamp\u{2019}s login cookie: in the system keyring (or a private file), never logged, and sent to nobody but bandcamp.com."</p>
+        </SysCard>
+    }
+}
+
+/// The fallback where no sign-in window can open (a browser on another device, or by choice).
+#[component]
+fn PasteCookie() -> impl IntoView {
     let value = RwSignal::new(String::new());
     let busy = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
@@ -167,8 +269,12 @@ fn Cookie() -> impl IntoView {
                 Ok(s) => {
                     // Write-only: the field is cleared, the cookie is never shown again.
                     value.set(String::new());
-                    crate::data::cache::patch::<IdentityStatus>("/harvest/identity", |x| *x = s);
-                    toast_ok("Cookie saved");
+                    crate::data::cache::patch::<IdentityStatus>("/harvest/identity", |x| *x = s.clone());
+                    if s.valid == Some(false) {
+                        error.set(Some("Bandcamp did not accept that cookie. Sign in on bandcamp.com again and copy a fresh one.".into()));
+                    } else {
+                        toast_ok("Signed in to Bandcamp");
+                    }
                 }
                 Err(e) => error.set(Some(e.message())),
             }
@@ -176,53 +282,24 @@ fn Cookie() -> impl IntoView {
         });
     };
     let save2 = save.clone();
-    let forget = move |_| {
-        spawn_local(async move {
-            if confirm("Forget the Bandcamp cookie?", "Harvesting your own collection and wishlist stops working until you paste a cookie again.", "Forget", true).await {
-                match api::call("DELETE", "/harvest/identity").await {
-                    Ok(()) => q.refetch(),
-                    Err(e) => toast_err(&e.message()),
-                }
-            }
-        });
-    };
     view! {
-        <SysCard title="Bandcamp account" icon="key"
-            hint="Needed only to harvest your own collection and wishlist. Public artist, label, tag and discover pages work without it. Bandcamp has no login API (it is behind reCAPTCHA), so the cookie is pasted manually.">
-            <Show when=move || q.data.get().map(|s| s.configured).unwrap_or(false)>
-                {move || q.data.get().map(|s| {
-                    let valid = s.valid;
-                    view! {
-                        <div class="cookie-state">
-                            <Icon name="lock" />
-                            <span>{s.username.clone().unwrap_or_else(|| "Cookie stored".into())}</span>
-                            <span class="mono faint">{s.fingerprint.clone().unwrap_or_default()}</span>
-                            {match valid {
-                                Some(true) => view! { <StatusBadge tone=Tone::Ok label="Valid" /> }.into_any(),
-                                Some(false) => view! { <StatusBadge tone=Tone::Danger label="Invalid" /> }.into_any(),
-                                None => view! { <StatusBadge tone=Tone::Neutral label="Not checked" /> }.into_any(),
-                            }}
-                            <span class="spacer"></span>
-                            <Button size=Size::Sm variant=Variant::Danger icon="trash" on_click=forget.clone()>"Forget"</Button>
-                        </div>
-                        {(!s.detail.is_empty()).then(|| view! { <p class="sys-hint faint">{s.detail.clone()}</p> })}
-                    }
-                })}
-            </Show>
-            <Show when=move || !q.data.get().map(|s| s.configured).unwrap_or(false)>
-                <div class="row gap">
-                    <input class="input mono grow" type="password" autocomplete="off" spellcheck="false" aria-label="Bandcamp cookie"
-                        placeholder="identity=...  (paste the whole Cookie header)"
-                        prop:value=move || value.get() on:input=move |ev| value.set(event_target_value(&ev))
-                        on:keydown={ let s = save2.clone(); move |ev| if ev.key() == "Enter" { s() } } />
-                    <Button variant=Variant::Primary busy=busy disabled=Signal::derive(move || value.get().trim().is_empty()) on_click=move |_| save()>
-                        {move || if busy.get() { "Verifying" } else { "Save" }}
-                    </Button>
-                </div>
-                <Notice text=error />
-            </Show>
-            <p class="sys-hint faint">"Stored locally in the system keyring or a file with tightened permissions, never logged, never returned by the API, and only ever sent to bandcamp.com."</p>
-        </SysCard>
+        <div class="paste-cookie">
+            <ol class="sys-hint paste-steps">
+                <li>"Open "<a href="https://bandcamp.com/login" target="_blank" rel="noopener">"bandcamp.com"</a>" in your browser and sign in."</li>
+                <li>"Open the developer tools (F12, or \u{2325}\u{2318}I on a Mac) and go to Application (Chrome) or Storage (Firefox, Safari) \u{203a} Cookies \u{203a} bandcamp.com."</li>
+                <li>"Copy the value of the cookie named "<code class="mono">"identity"</code>" and paste it here."</li>
+            </ol>
+            <div class="row gap">
+                <input class="input mono grow" type="password" autocomplete="off" spellcheck="false" aria-label="Bandcamp identity cookie"
+                    placeholder="identity cookie"
+                    prop:value=move || value.get() on:input=move |ev| value.set(event_target_value(&ev))
+                    on:keydown={ let s = save2.clone(); move |ev| if ev.key() == "Enter" { s() } } />
+                <Button busy=busy disabled=Signal::derive(move || value.get().trim().is_empty()) on_click=move |_| save()>
+                    {move || if busy.get() { "Checking" } else { "Save" }}
+                </Button>
+            </div>
+            <Notice text=error />
+        </div>
     }
 }
 

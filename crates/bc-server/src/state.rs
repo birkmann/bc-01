@@ -33,6 +33,8 @@ pub struct ServerOptions {
     pub no_services: bool,
     /// `Cross-Origin-Embedder-Policy` value (`credentialless` default, or `require-corp`).
     pub coep: Option<String>,
+    /// Set by the desktop app: it answers `desktop.bandcamp_login` requests with a sign-in window.
+    pub bandcamp_login: bool,
 }
 
 impl ServerOptions {

@@ -19,7 +19,7 @@ const FIREFOX_NAMES: [&str; 5] = ["firefox", "firefox-esr", "librewolf", "floorp
 
 /// The browser that hosts the app window.
 #[derive(Debug, Clone, PartialEq)]
-enum Browser {
+pub(crate) enum Browser {
     /// Chromium family: a real app window (`--app=URL`).
     Chromium(PathBuf),
     /// Firefox or a fork: no app mode, so a private profile hides the browser chrome.
@@ -40,7 +40,7 @@ fn on_path(name: &str) -> Option<PathBuf> {
 }
 
 /// A Chromium-family browser when one is installed (the best app window), else Firefox.
-fn find_browser() -> Option<Browser> {
+pub(crate) fn find_browser() -> Option<Browser> {
     if let Some(b) = std::env::var_os("BC_DESKTOP_BROWSER") {
         return Some(Browser::from_path(PathBuf::from(b)));
     }
@@ -51,7 +51,7 @@ fn find_browser() -> Option<Browser> {
         .or_else(|| FIREFOX_NAMES.iter().find_map(|n| on_path(n)).map(Browser::Firefox))
 }
 
-fn profile_dir(name: &str) -> PathBuf {
+pub(crate) fn profile_dir(name: &str) -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
@@ -62,7 +62,7 @@ fn profile_dir(name: &str) -> PathBuf {
 /// Turn off the browser's own chrome for this private profile: translate offers (the UI is
 /// English, the user's browser language may not be), password prompts, the desktop-themed frame. Only rewritten when the
 /// browser is not running on the profile (Chrome rewrites Preferences on exit).
-fn quiet_profile(profile: &std::path::Path) {
+pub(crate) fn quiet_profile(profile: &std::path::Path) {
     if profile.join("SingletonLock").exists() {
         return;
     }
@@ -158,11 +158,19 @@ fn chromium_cmd(browser: PathBuf, url: &str) -> Command {
     let profile = profile_dir("window-profile");
     let _ = std::fs::create_dir_all(&profile);
     quiet_profile(&profile);
+    let mut cmd = chromium_app(&browser, &profile, url);
+    cmd.args(["--window-size=1360,860", "--autoplay-policy=no-user-gesture-required"]);
+    cmd
+}
+
+/// A Chromium app window on `url` with its own profile, without the browser's prompts and with
+/// the window class `bc`. Shared by the main window and the Bandcamp sign-in window.
+pub(crate) fn chromium_app(browser: &std::path::Path, profile: &std::path::Path, url: &str) -> Command {
     let mut cmd = Command::new(browser);
     cmd.arg(format!("--app={url}"))
         .arg(format!("--user-data-dir={}", profile.display()))
-        .args(["--class=bc", "--name=bc", "--no-first-run", "--no-default-browser-check", "--window-size=1360,860"])
-        .args(["--disable-features=Translate,TranslateUI,MediaRouter", "--autoplay-policy=no-user-gesture-required"])
+        .args(["--class=bc", "--name=bc", "--no-first-run", "--no-default-browser-check"])
+        .args(["--disable-features=Translate,TranslateUI,MediaRouter"])
         // Distro/AUR builds of Chrome cannot self-update and nag "Chrome can't be updated" in
         // every window; a far-future "outdated" date switches that bubble off for this app
         // window only. Updates still come from the package manager.
@@ -245,6 +253,8 @@ impl ksni::Tray for BcTray {
 pub async fn run(core: Arc<Core>) -> anyhow::Result<()> {
     let app = Arc::new(App { core, window: Mutex::new(None), quit: tokio::sync::Notify::new() });
     app.show();
+    let c = app.core.clone();
+    crate::on_login_request(&app.core, move || crate::login::open(c.clone()));
     // Without a tray host (e.g. GNOME without the AppIndicator extension) this just fails.
     let _tray = BcTray { app: app.clone() }.spawn().await.map_err(|e| tracing::warn!("no tray: {e}")).ok();
 

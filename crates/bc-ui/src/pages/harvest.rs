@@ -336,7 +336,7 @@ pub fn HarvestPage() -> impl IntoView {
                 })}
                 {move || note.get().map(|n| { let (cls, text) = n.parts(); view! { <p class=cls role=if cls == "hv-note err" { "alert" } else { "status" }>{text.to_string()}</p> } })}
                 {move || identity.data.with(|d| d.as_ref().is_some_and(|i| !i.configured)).then(|| view! {
-                    <p class="faint hv-hint">"Your own collection and wishlist need a Bandcamp cookie \u{2014} add one in "<a href="/settings" class="hv-a">"Settings"</a>". Public artist, label, tag and discover pages work without it."</p>
+                    <p class="faint hv-hint">"Your own collection and wishlist need you to sign in to Bandcamp \u{2014} do it in "<a href="/settings?tab=downloads" class="hv-a">"Settings"</a>". Public artist, label, tag and discover pages work without it."</p>
                 })}
             </section>
             <p class="hv-lead hv-lead2"><b>"2 \u{b7} Pick from the inbox."</b>" Everything harvested lands here first; nothing downloads by itself. Tap covers to select, then queue them as one download job."</p>

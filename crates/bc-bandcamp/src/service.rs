@@ -134,6 +134,12 @@ impl BandcampService {
         crate::api::explore::start(&self.ctx).await;
     }
 
+    /// Store the cookie a sign-in window picked up and check it with Bandcamp (the desktop app's
+    /// counterpart of `PUT /harvest/identity`). `Err` carries a message for the user.
+    pub async fn store_cookie(&self, cookie: &str) -> Result<bc_types::bandcamp::IdentityStatus, String> {
+        crate::api::harvest::store_identity(&self.ctx, cookie).await.map_err(|e| e.problem.detail.unwrap_or(e.problem.title))
+    }
+
     /// Routes WITHOUT the `/api` prefix, state applied.
     pub fn router(&self) -> Router {
         crate::api::router(&self.ctx)

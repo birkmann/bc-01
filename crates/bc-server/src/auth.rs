@@ -84,7 +84,7 @@ fn token_from(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
     query.and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=").map(str::to_string)))
 }
 
-fn is_loopback(peer: Option<SocketAddr>) -> bool {
+pub(crate) fn is_loopback(peer: Option<SocketAddr>) -> bool {
     match peer {
         None => true, // in-process (tests, tower oneshot)
         Some(a) => match a.ip() {

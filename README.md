@@ -102,11 +102,14 @@ To build it yourself (Rust with the `wasm32-unknown-unknown` target, `trunk`,
 
 1. Open **Settings → Library** and add the folder that holds your music. It
    is scanned in the background, then analyzed.
-2. For collections, wishlists and the feed, paste your Bandcamp cookie under
-   **Settings → Bandcamp**. It is stored with 0600 permissions or in the
-   system keyring, is never logged, and is only sent to `*.bandcamp.com`.
-   With the cookie set, pick a **Download quality** there: releases you
-   bought are then downloaded from your collection in that format.
+2. For collections, wishlists and the feed, click **Sign in to Bandcamp**
+   under **Settings → Bandcamp**. In the desktop app this opens Bandcamp's own
+   sign-in page in a window, and bc keeps only the login cookie, never the
+   password. In a browser on another device, paste the `identity` cookie
+   instead. The cookie is stored with 0600 permissions or in the system
+   keyring, is never logged, and is only sent to `*.bandcamp.com`. Once you
+   are signed in, pick a **Download quality** there: releases you bought are
+   then downloaded from your collection in that format.
 3. Browse **Explore, Feed and Fans**; queue what you want under
    **Downloads**. Finished downloads are added to the library automatically.
 4. Double-click any track to play it. **DJ Sets → New set** starts a set:
@@ -180,8 +183,8 @@ per area are in `docs/api/`; the `.bcw2` waveform format is described in
 
 ## Known limitations
 
-- Purchase-quality downloads need the Bandcamp cookie and the built-in
-  downloader. A track bought on its own is only found when it is queued with
+- Purchase-quality downloads need you to be signed in to Bandcamp and the
+  built-in downloader. A track bought on its own is only found when it is queued with
   **Tracks only**; otherwise it is widened to its album and comes from the
   stream.
 - On a real library the native key matches essentia on about 93 % of tracks,

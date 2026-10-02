@@ -73,7 +73,7 @@ impl From<String> for Secret {
     }
 }
 
-/// Accept either a bare `identity=...` or a whole pasted Cookie header.
+/// Accept a bare `identity=...`, just its value, or a whole pasted Cookie header.
 ///
 /// Users copy the entire header out of devtools, and some endpoints may need
 /// the companion cookies (`client_id`, `session`), so the whole string is
@@ -84,6 +84,10 @@ pub fn normalise_cookie(raw: &str) -> String {
     let is_header = text.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("cookie:"));
     if is_header {
         return text[7..].trim().to_string();
+    }
+    // Just the value, copied from the browser's cookie list.
+    if !text.is_empty() && !text.contains(['=', ';', ' ']) {
+        return format!("identity={text}");
     }
     text.to_string()
 }
@@ -323,6 +327,7 @@ mod tests {
         assert_eq!(normalise_cookie("  identity=abc;  "), "identity=abc");
         assert_eq!(normalise_cookie("Cookie: identity=abc; client_id=9"), "identity=abc; client_id=9");
         assert_eq!(normalise_cookie("cookie:identity=abc"), "identity=abc");
+        assert_eq!(normalise_cookie(" 7%09abc%7B%22id%22%3A1%7D "), "identity=7%09abc%7B%22id%22%3A1%7D");
     }
 
     #[test]

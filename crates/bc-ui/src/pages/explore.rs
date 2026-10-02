@@ -793,7 +793,7 @@ fn ReleaseView(r: Arc<ExploreReleaseOut>) -> impl IntoView {
                         <a class="btn btn-ghost" href=r.url.clone() target="_blank" rel="noreferrer" title="Open on Bandcamp" aria-label="Open on Bandcamp"><Icon name="external" /><span class="xg-lbl">"Bandcamp"</span></a>
                     </div>
                     {(!r.is_free_download && r.is_purchasable && !r.in_library).then(|| view! {
-                        <p class="faint xg-paid">"This release is paid. Downloading fetches only what Bandcamp offers; buy it there, or add your account cookie in Settings, to get the real files."</p>
+                        <p class="faint xg-paid">"This release is paid. Downloading fetches only what Bandcamp offers; buy it there, or sign in to Bandcamp in Settings if you already own it, to get the real files."</p>
                     })}
                 </div>
             </div>

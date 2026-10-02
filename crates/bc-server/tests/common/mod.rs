@@ -13,7 +13,7 @@ pub fn config(dir: &std::path::Path) -> Config {
 }
 
 pub fn opts_with_ui(ui: Option<&std::path::Path>) -> ServerOptions {
-    ServerOptions { ui_dir: ui.map(|p| p.to_path_buf()), no_ui: false, no_services: true, coep: None }
+    ServerOptions { ui_dir: ui.map(|p| p.to_path_buf()), no_ui: false, no_services: true, coep: None, bandcamp_login: false }
 }
 
 pub async fn body_string(resp: axum::response::Response) -> String {

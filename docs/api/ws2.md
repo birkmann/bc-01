@@ -99,6 +99,8 @@ and register it with `JobsService::add_hooks`.
 | GET / POST / DELETE | `/harvest/labels/sweep` | `LabelSweepRequest` | `SweepStatus` (POST = 202) |
 | GET / POST / DELETE | `/harvest/favorites/sweep` | | `SweepStatus` (POST = 202) |
 | GET / PUT / DELETE | `/harvest/identity` | `CookieRequest` | `IdentityStatus` / 204 (cookie never returned) |
+| GET | `/desktop` | | `DesktopInfo` (`bandcamp_login`: the desktop app can open a sign-in window for this caller) |
+| POST | `/desktop/bandcamp-login` | | 202; the desktop app opens the window and reports on `bandcamp.login` (`BandcampLoginEvent`); 404 outside the desktop app or from another device |
 | GET | `/harvest/health` | | `HarvestHealth` |
 
 ### Fans

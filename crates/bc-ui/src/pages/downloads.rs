@@ -254,7 +254,7 @@ fn AddForm() -> impl IntoView {
                 }}
             </div>
             {move || error.get().map(|e| view! { <p class="small danger-text dl-prev"><Icon name="alert" />{e}</p> })}
-            <p class="small faint">"Releases you bought come in the format chosen under Settings \u{203a} Downloads (with your Bandcamp cookie set); everything else is Bandcamp's public stream."</p>
+            <p class="small faint">"Releases you bought come in the format chosen under Settings \u{203a} Downloads (when you are signed in to Bandcamp); everything else is Bandcamp's public stream."</p>
         </section>
     }
 }

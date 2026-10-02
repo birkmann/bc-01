@@ -228,8 +228,8 @@ fn BandcampWay(roots: Vec<RootOut>) -> impl IntoView {
                             "Signed in{}. Sweep your collection into the inbox and queue what you want on disk.",
                             s.username.as_ref().map(|u| format!(" as {u}")).unwrap_or_default()
                         ),
-                        Some(s) if s.configured => "The stored cookie no longer works. Paste a fresh one to reach your purchases.".to_string(),
-                        _ => "Paste your Bandcamp cookie once and bc can download everything you\u{2019}ve bought, in the format you pick.".to_string(),
+                        Some(s) if s.configured => "Your Bandcamp sign-in has expired. Sign in again to reach your purchases.".to_string(),
+                        _ => "Sign in to Bandcamp once and bc can download everything you\u{2019}ve bought, in the format you pick.".to_string(),
                     }}</p>
                 </div>
             </div>
@@ -241,7 +241,7 @@ fn BandcampWay(roots: Vec<RootOut>) -> impl IntoView {
                     }.into_any()
                 } else {
                     view! {
-                        <a class="btn btn-outline btn-sm" href="/settings?tab=downloads"><Icon name="key" />"Connect account"</a>
+                        <a class="btn btn-outline btn-sm" href="/settings?tab=downloads"><Icon name="key" />"Sign in"</a>
                         <span class="faint hm-wel-fine">"Optional: Explore and Feed work without it."</span>
                     }.into_any()
                 }}
