@@ -14,6 +14,7 @@ use crate::api;
 use crate::data::{QuerySpec, use_query};
 use crate::ds::{Button, Icon, Size, Variant, confirm, toast_err, toast_ok, use_debounced};
 use crate::logic::format::format_count;
+use crate::pages::explore::cards::CardPlay;
 use crate::player::use_player;
 use crate::util::{enc, qs};
 use crate::widgets::card_grid::CardGrid;
@@ -257,7 +258,15 @@ pub fn BandcampPicker(
                 }
                 let hits = bands.get();
                 if hits.is_empty() {
-                    return view! { <p class="pp-hint">{format!("Bandcamp has no {noun} page named \u{201c}{}\u{201d}. Try another spelling.", s.trim())}</p> }.into_any();
+                    // Their records may still be on Bandcamp under a label's page: the full search
+                    // finds releases and tracks too, not just artist and label pages.
+                    let term = s.trim().to_string();
+                    return view! {
+                        <p class="pp-hint">{format!("Bandcamp has no {noun} page named \u{201c}{term}\u{201d}. Try another spelling, or search everything.")}</p>
+                        <a class="lib-pill" href=format!("/explore?q={}", enc(&term)) title="Search releases, tracks, artists and labels on Bandcamp">
+                            <Icon name="compass" size=12 />{format!("Search Bandcamp for \u{201c}{term}\u{201d}")}
+                        </a>
+                    }.into_any();
                 }
                 view! {
                     <ul class="pp-hits">
@@ -425,6 +434,8 @@ fn BcCard(
     let url = r.url.clone();
     let url_sel = r.url.clone();
     let url_dl = r.url.clone();
+    // Missing releases stream from Bandcamp; owned ones play the library's files.
+    let (url_play, title_play, lib_id) = (r.url.clone(), r.title.clone(), r.library_release_id);
     let missing = lg::is_missing(&r);
     let href = lg::release_path(&r.url);
     let is_picked = {
@@ -445,13 +456,18 @@ fn BcCard(
             <div class="pp-card-art">
                 <Cover src=r.art_url.clone() />
                 <div class="pp-card-badges">{status}{r.is_free_download.then(|| view! { <span class="badge">"free"</span> })}</div>
-                {move || (!selecting.get() && missing).then(|| {
-                    let (u, fu) = (url_dl.clone(), file_under.clone());
+                {move || (!selecting.get()).then(|| {
+                    let (u, fu, up, tp) = (url_dl.clone(), file_under.clone(), url_play.clone(), title_play.clone());
                     view! {
-                        <button type="button" class="pp-chipbtn pp-card-act" title="Download this release" aria-label=format!("Download {}", "release")
-                            on:click=move |ev| { ev.stop_propagation(); ev.prevent_default(); queue_urls(vec![u.clone()], fu.clone(), Callback::new(|_| {})); }>
-                            <Icon name="download" />
-                        </button>
+                        <div class="pp-bc-acts">
+                            {missing.then(|| view! {
+                                <button type="button" class="pp-chipbtn" title="Download this release" aria-label="Download release"
+                                    on:click=move |ev| { ev.stop_propagation(); ev.prevent_default(); queue_urls(vec![u.clone()], fu.clone(), Callback::new(|_| {})); }>
+                                    <Icon name="download" />
+                                </button>
+                            })}
+                            <CardPlay url=up title=tp library_id=lib_id />
+                        </div>
                     }
                 })}
             </div>

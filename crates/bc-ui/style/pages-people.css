@@ -54,6 +54,11 @@
 .pp-card-badges .badge-ok { color: var(--color-ok); }
 .pp-card-badges .badge-accent { color: var(--color-accent); }
 .pp-card-act { position: absolute; right: 6px; bottom: 6px; z-index: 3; }
+/* Bandcamp cards: download chip + play (streams when missing, library files when owned). */
+.pp-bc-acts { position: absolute; right: 6px; bottom: 6px; z-index: 3; display: flex; gap: 6px; align-items: center; }
+.pp-bc-acts .xc-play { position: static; width: 34px; height: 34px; }
+@media (hover: hover) and (pointer: fine) { .pp-card:hover .xc-play, .pp-card:focus-within .xc-play { opacity: 1; } }
+@media (pointer: coarse) { .pp-bc-acts .xc-play { width: 40px; height: 40px; } }
 .pp-cover { position: absolute; inset: 0; background: var(--color-surface-3); overflow: hidden; }
 .pp-cover.pp-round { border-radius: 50%; }
 .pp-cover img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--dur-slow) var(--ease); display: block; }

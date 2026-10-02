@@ -104,14 +104,18 @@ pub fn JobItems(job_id: String) -> impl IntoView {
     };
 
     let fetch_groups = move |reset: bool| {
+        // Timers and socket events can land after the panel is gone.
         let g = if reset {
-            generation.update_value(|g| *g += 1);
-            generation.get_value()
+            generation.try_update_value(|g| {
+                *g += 1;
+                *g
+            })
         } else {
-            generation.get_value()
+            generation.try_get_value()
         };
+        let (Some(g), Some(job_id)) = (g, ctx.job_id.try_get_value()) else { return };
         let offset = if reset { 0 } else { groups.with_untracked(|v| v.len()) };
-        let mut url = format!("/jobs/{}/groups?offset={offset}&limit={GROUPS_PAGE}", ctx.job_id.get_value());
+        let mut url = format!("/jobs/{job_id}/groups?offset={offset}&limit={GROUPS_PAGE}");
         if let Some(s) = filter.get_untracked().status() {
             url.push_str(&format!("&status={s}"));
         }
@@ -184,13 +188,14 @@ pub fn JobItems(job_id: String) -> impl IntoView {
     let schedule_reload: Arc<dyn Fn() + Send + Sync> = {
         let f = fetch_groups.clone();
         Arc::new(move || {
-            if reload_pending.get_value() {
+            if reload_pending.try_get_value() != Some(false) {
                 return;
             }
             reload_pending.set_value(true);
             let f = f.clone();
             crate::util::after(900, move || {
-                if reload_pending.try_set_value(false).is_some() {
+                // `None` means the write landed, i.e. the panel is still mounted.
+                if reload_pending.try_set_value(false).is_none() {
                     f(true);
                     epoch.update(|e| *e += 1);
                 }

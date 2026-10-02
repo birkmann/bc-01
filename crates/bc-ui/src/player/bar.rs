@@ -12,6 +12,7 @@ use super::waveform::{Playhead, WaveCanvas, WaveLevel, load_music};
 use crate::app::use_app;
 use crate::ds::{Button, Icon, MenuButton, MenuEntry, MenuItem, Size, Variant, dyn_icon};
 use crate::logic::format::format_duration_s;
+use crate::pages::explore::logic::{band_path, origin_of, release_path};
 use crate::widgets::common::{EntityLink, LoveButton, album_href, artist_href};
 
 /// Elapsed / remaining text, updated only when the displayed second changes.
@@ -216,9 +217,11 @@ pub fn PlayerBar() -> impl IntoView {
         let mut m = Markers::default();
         if let Some(info) = music.get() {
             m.grid = info.grid.clone();
-            m.cues = info.cues.clone();
             m.chapter_ticks = info.grid.is_some();
-            // mix-in / mix-out only mean something while DJ mix is on
+            // cues, mix-in and mix-out only mean something while DJ mix is on
+            if mixing.get() {
+                m.cues = info.cues.clone();
+            }
             if let Some(mp) = info.mix_points.as_ref().filter(|_| mixing.get()) {
                 m.mix_in_s = Some(mp.cue_in_ms as f64 / 1000.0);
             }
@@ -235,19 +238,29 @@ pub fn PlayerBar() -> impl IntoView {
     // reactive: follows Settings changes immediately; "bars" is the default
     let waveform_style = Signal::derive(move || prefs.prefs.with(|p| if p.player_wave_style == "rgb" { "rgb".to_string() } else { "bars".to_string() }));
     let playing = Signal::derive(move || st.with(|s| s.status == PlayerStatus::Playing));
-    // Library items link up to their album and artist; streams and "nothing playing" stay text.
+    // Library items link up to their album and artist; Bandcamp streams to the release and band
+    // pages in Explore (the band is the release page's site); "nothing playing" stays text.
     // Memoised so the links rebuild only when the track changes, not on every state tick.
-    let now = Memo::new(move |_| st.with(|s| s.current.as_ref().map(|c| (c.title.clone(), c.release_id.filter(|id| *id > 0), c.album.clone(), c.artist.clone(), c.artist_id.filter(|id| *id > 0)))));
+    let now = Memo::new(move |_| {
+        st.with(|s| {
+            s.current.as_ref().map(|c| {
+                let page = c.page_url.clone().filter(|u| !u.is_empty());
+                let album_link = c.release_id.filter(|id| *id > 0).map(album_href).or_else(|| page.as_deref().map(release_path));
+                let artist_link = c.artist_id.filter(|id| *id > 0).map(artist_href).or_else(|| page.as_deref().and_then(origin_of).map(|o| band_path(&o)));
+                (c.title.clone(), album_link, c.album.clone(), c.artist.clone(), artist_link)
+            })
+        })
+    });
     let title = move || match now.get() {
-        Some((t, Some(rid), album, ..)) => {
+        Some((t, Some(href), album, ..)) => {
             let tip = album.map(|a| format!("Open {a}")).unwrap_or_else(|| "Open album".into());
-            view! { <EntityLink href=album_href(rid) title=tip>{t}</EntityLink> }.into_any()
+            view! { <EntityLink href=href title=tip>{t}</EntityLink> }.into_any()
         }
         Some((t, None, ..)) => view! { {t} }.into_any(),
         None => view! { "Nothing playing" }.into_any(),
     };
     let artist = move || match now.get() {
-        Some((_, _, _, Some(name), Some(aid))) => view! { <EntityLink href=artist_href(aid)>{name}</EntityLink> }.into_any(),
+        Some((_, _, _, Some(name), Some(href))) => view! { <EntityLink href=href>{name}</EntityLink> }.into_any(),
         Some((_, _, _, Some(name), None)) => view! { {name} }.into_any(),
         _ => ().into_any(),
     };

@@ -68,7 +68,8 @@
 .xc-q.s3 { color: var(--color-danger); }
 .xc-q:disabled { cursor: default; }
 @media (hover: hover) and (pointer: fine) {
-  .xc-play:not(.on):not(.busy):not(.err), .xc-q.s0 { opacity: 0; }
+  /* zero-weight :where so the hover rules below (and on label cards) can reveal it */
+  .xc-play:where(:not(.on, .busy, .err)), .xc-q.s0 { opacity: 0; }
   .xc:hover .xc-play, .xc:focus-within .xc-play, .xc:hover .xc-q, .xc:focus-within .xc-q { opacity: 1; }
 }
 .xc-tick { position: absolute; top: 6px; right: 6px; z-index: 2; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; border: 2px solid rgb(255 255 255 / .75); background: rgb(0 0 0 / .45); color: transparent; pointer-events: none; }
