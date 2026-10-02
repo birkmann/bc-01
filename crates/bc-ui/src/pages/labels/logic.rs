@@ -1,6 +1,7 @@
 //! Pure logic shared by the Artists and Labels pages (no DOM): copy for banners, catalogue
 //! filtering, URL helpers, range selection. Ported from the legacy `Labels.tsx` / `Artists.tsx`.
 use bc_types::bandcamp::{ReleaseCardOut, RunResult, SweepStatus};
+use bc_types::player::ExploreCard;
 use bc_types::library::{ArtistSort, LabelSort, SortDir};
 
 use crate::logic::format::format_count;
@@ -140,6 +141,22 @@ pub fn catalogue_counts(all: &[ReleaseCardOut]) -> (usize, usize, usize) {
     (all.iter().filter(|r| is_missing(r)).count(), all.iter().filter(|r| r.in_library).count(), all.len())
 }
 
+/// Everything to shuffle for a whole artist or label: the Bandcamp catalogue (owned releases play
+/// from the library, the rest stream), without what is blacklisted, plus the library releases
+/// the catalogue does not list (`library` is `(release id, Bandcamp URL)`).
+pub fn whole_catalogue(catalogue: &[ReleaseCardOut], library: &[(i64, Option<String>)]) -> Vec<ExploreCard> {
+    let mut cards: Vec<ExploreCard> =
+        catalogue.iter().filter(|r| !r.blacklisted).map(|r| ExploreCard { url: r.url.clone(), library_release_id: r.library_release_id }).collect();
+    let listed: std::collections::HashSet<i64> = catalogue.iter().filter_map(|r| r.library_release_id).collect();
+    cards.extend(
+        library
+            .iter()
+            .filter(|(id, _)| !listed.contains(id))
+            .map(|(id, url)| ExploreCard { url: url.clone().unwrap_or_default(), library_release_id: Some(*id) }),
+    );
+    cards
+}
+
 // ---- banner copy --------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -235,6 +252,22 @@ mod tests {
 
     fn card(in_library: bool, blacklisted: bool) -> ReleaseCardOut {
         ReleaseCardOut { url: "u".into(), title: "t".into(), artist_name: "a".into(), item_type: "album".into(), art_url: None, release_date: None, is_free_download: false, in_library, blacklisted, library_release_id: None }
+    }
+
+    #[test]
+    fn whole_catalogue_streams_missing_plays_owned_and_adds_library_only_releases() {
+        let owned = ReleaseCardOut { url: "o".into(), library_release_id: Some(7), ..card(true, false) };
+        let missing = ReleaseCardOut { url: "m".into(), ..card(false, false) };
+        let banned = ReleaseCardOut { url: "b".into(), ..card(false, true) };
+        let cards = whole_catalogue(&[owned, missing, banned], &[(7, Some("o".into())), (9, None)]);
+        assert_eq!(
+            cards,
+            vec![
+                ExploreCard { url: "o".into(), library_release_id: Some(7) },
+                ExploreCard { url: "m".into(), library_release_id: None },
+                ExploreCard { url: String::new(), library_release_id: Some(9) },
+            ]
+        );
     }
 
     #[test]

@@ -144,7 +144,7 @@ impl PlayerService {
         let (tx, rx) = crossbeam_channel::unbounded();
         let handle = PlayerHandle { tx, shared: shared.clone() };
         let mpris_enabled = cfg.mpris;
-        let mpris: Option<Box<dyn Publisher>> = if mpris_enabled { crate::mpris::start(handle.clone()) } else { None };
+        let mpris: Option<Box<dyn Publisher>> = if mpris_enabled { crate::mpris::start(handle.clone(), cfg.base_url.clone()) } else { None };
         let publisher = BusPublisher { bus, shared, mpris };
         let session = Session::new(ports, Box::new(publisher), cfg);
         Self { handle, db: None, ffmpeg: "ffmpeg".into(), session: Mutex::new(Some((session, rx))), join: Mutex::new(None), mpris: mpris_enabled }

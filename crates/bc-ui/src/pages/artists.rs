@@ -56,6 +56,25 @@ async fn fetch_ids(q: String, sort: String, lo: usize, hi: usize) -> Vec<i64> {
     out
 }
 
+/// Shuffle everything an artist has made, downloaded or not: the Bandcamp catalogue (owned
+/// releases from the library's files, the rest streamed) plus library releases Bandcamp does not
+/// list, mixed per track while the player loads the releases in the background. Without a
+/// catalogue it is the library's tracks.
+pub fn shuffle_artist(player: crate::player::PlayerCtx, id: i64, band: Option<Arc<bc_types::bandcamp::BandOut>>) {
+    let Some(band) = band.filter(|b| !b.releases.is_empty()) else { return play_artist(id, true) };
+    spawn_local(async move {
+        let library = api::get::<Page<bc_types::library::ReleaseOut>>(&format!("/releases?artist_id={id}&limit=500"))
+            .await
+            .map(|p| p.items.into_iter().map(|r| (r.id, r.bandcamp_url)).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let cards = lg::whole_catalogue(&band.releases, &library);
+        if cards.is_empty() {
+            return play_artist(id, true);
+        }
+        player.cmd(bc_types::player::PlayerCommand::StartSource { source: bc_types::player::QueueSource::Explore { cards, shuffle: true, next: 0 }, shuffle: true });
+    });
+}
+
 /// Play every track of an artist (album order), or a random draw of them.
 pub fn play_artist(id: i64, shuffle: bool) {
     let mut tq = TrackQuery { artist_id: Some(id), limit: Some(500), offset: Some(0), ..Default::default() };

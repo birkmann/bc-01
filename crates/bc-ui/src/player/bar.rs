@@ -190,6 +190,59 @@ pub fn TransitionStrip() -> impl IntoView {
     }
 }
 
+/// Download the release a Bandcamp stream belongs to, straight from the bar: what you hear
+/// while digging is one click from the library. Mounted per release, so a queued tick never
+/// carries over to the next record.
+#[component]
+fn StreamDownload(page_url: String, label: String) -> impl IntoView {
+    #[derive(Clone, Copy, PartialEq)]
+    enum St {
+        Idle,
+        Busy,
+        Queued,
+        Held,
+        Failed,
+    }
+    let state = RwSignal::new(St::Idle);
+    let body = bc_types::bandcamp::DownloadReleasesRequest { urls: vec![page_url], label: Some(label.clone()), ..Default::default() };
+    let tip = move || match state.get() {
+        St::Queued => "Queued for download. See Downloads".to_string(),
+        St::Held => "Already in your library".to_string(),
+        St::Failed => format!("Download {label} (the last try failed)"),
+        _ => format!("Download {label}"),
+    };
+    let tip2 = tip.clone();
+    let go = move |_| {
+        state.set(St::Busy);
+        let body = body.clone();
+        spawn_local(async move {
+            match crate::api::post::<_, bc_types::jobs::JobOut>("/explore/download", &body).await {
+                // Held or blacklisted already: the job is recorded settled, with the release skipped.
+                Ok(job) if job.total > 0 && job.skipped >= job.total => {
+                    let _ = state.try_set(St::Held);
+                    crate::ds::toast_ok("Already in your library");
+                }
+                Ok(_) => {
+                    let _ = state.try_set(St::Queued);
+                    crate::ds::toast_ok("Queued for download");
+                }
+                Err(e) => {
+                    let _ = state.try_set(St::Failed);
+                    crate::ds::toast_err(&e.message());
+                }
+            }
+        });
+    };
+    view! {
+        <button type="button" class=move || if matches!(state.get(), St::Queued | St::Held) { "btn btn-ghost btn-sm btn-icon is-on" } else { "btn btn-ghost btn-sm btn-icon" }
+            title=tip aria-label=tip2
+            disabled=move || state.get() != St::Idle && state.get() != St::Failed
+            on:click=go>
+            <Icon name=dyn_icon(move || match state.get() { St::Busy => "refresh", St::Queued | St::Held => "check", _ => "download" }) />
+        </button>
+    }
+}
+
 #[component]
 pub fn PlayerBar() -> impl IntoView {
     let player = use_player();
@@ -264,6 +317,19 @@ pub fn PlayerBar() -> impl IntoView {
         Some((_, _, _, Some(name), None)) => view! { {name} }.into_any(),
         _ => ().into_any(),
     };
+    // A Bandcamp stream's release page and a job label for it: the download button's whole input.
+    let stream_release = Memo::new(move |_| {
+        st.with(|s| {
+            let c = s.current.as_ref().filter(|c| c.origin == ItemOrigin::Bandcamp)?;
+            let url = c.page_url.clone().filter(|u| !u.is_empty())?;
+            let what = c.album.clone().filter(|a| !a.is_empty()).unwrap_or_else(|| c.title.clone());
+            let label = match c.artist.as_deref().filter(|a| !a.is_empty()) {
+                Some(a) => format!("{a} \u{2014} {what}"),
+                None => what,
+            };
+            Some((url, label))
+        })
+    });
     let art = Signal::derive(move || st.with(|s| s.current.as_ref().and_then(|c| c.art_url.clone())));
     let volume = RwSignal::new(0.8f64);
     Effect::new(move |_| volume.set(st.with(|s| s.volume)));
@@ -295,6 +361,7 @@ pub fn PlayerBar() -> impl IntoView {
                         <div class="pl-artist truncate muted">{artist}</div>
                     </div>
                     {move || track_id.get().map(|id| view! { <LoveButton track_id=id loved=loved /> })}
+                    {move || stream_release.get().map(|(url, label)| view! { <StreamDownload page_url=url label=label /> })}
                 </div>
                 <div class="pl-center">
                     <div class="pl-controls">

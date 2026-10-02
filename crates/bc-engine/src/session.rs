@@ -183,6 +183,10 @@ const LOAD_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_HISTORY: usize = 500;
 /// How far ahead an explore sweep keeps the queue.
 const SWEEP_LOOKAHEAD: usize = 12;
+/// The same for a shuffled sweep, counted in unplayed tracks: new tracks join the unplayed part
+/// at random places, so a deep lookahead is what mixes a whole catalogue together (an artist's
+/// releases all load in the background) instead of two albums at a time.
+const SHUFFLE_SWEEP_LOOKAHEAD: usize = 400;
 const MAX_QUEUE: usize = 5000;
 
 pub struct Session {
@@ -2052,7 +2056,9 @@ impl Session {
             return;
         }
         let Some(QueueSource::Explore { cards, next, .. }) = self.st.source.as_ref() else { return };
-        if *next >= cards.len() || self.upcoming().len() >= SWEEP_LOOKAHEAD {
+        // Shuffled, the queue's order says nothing about what plays next; the unplayed pool does.
+        let ahead = if self.st.shuffle { (self.shuffle_unplayed.len(), SHUFFLE_SWEEP_LOOKAHEAD) } else { (self.upcoming().len(), SWEEP_LOOKAHEAD) };
+        if *next >= cards.len() || ahead.0 >= ahead.1 {
             return;
         }
         let src = self.st.source.clone().unwrap_or(QueueSource::Explore { cards: vec![], shuffle: false, next: 0 });

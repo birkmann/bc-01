@@ -76,6 +76,9 @@ pub fn ArtistDetailPage() -> impl IntoView {
     let missing = Signal::derive(move || band_data.get().map(|b| lg::catalogue_counts(&b.releases).0).unwrap_or(0));
     let exact = Signal::derive(move || band_data.get().map(|b| !b.truncated).unwrap_or(false));
     let no_tracks = Signal::derive(move || artist.data.get().map(|a| a.track_count == 0).unwrap_or(true));
+    // Shuffle reaches the whole Bandcamp catalogue too, so it needs no track on disk.
+    let nothing_to_shuffle = Signal::derive(move || no_tracks.get() && band_data.get().is_none_or(|b| b.releases.is_empty()));
+    let player = crate::player::use_player();
     let hero_art = Signal::derive(move || band_data.get().and_then(|b| b.image_url.clone()).or_else(|| artist.data.get().and_then(|a| a.art_url.clone()).map(|u| lg::thumb(&u).replace("size=thumb", "size=full"))));
     let location = Signal::derive(move || band_data.get().and_then(|b| b.location.clone()).filter(|l| !l.is_empty()).or_else(|| artist.data.get().and_then(|a| a.location.clone())));
 
@@ -153,7 +156,8 @@ pub fn ArtistDetailPage() -> impl IntoView {
                     })}
                     <div class="pp-actions">
                         <Button variant=Variant::Primary icon="play" disabled=no_tracks on_click=move |_| super::play_artist(id.get_untracked(), false)>"Play"</Button>
-                        <Button icon="shuffle" disabled=no_tracks on_click=move |_| super::play_artist(id.get_untracked(), true) title="Shuffle"><span class="hide-sm">"Shuffle"</span></Button>
+                        <Button icon="shuffle" disabled=nothing_to_shuffle on_click=move |_| super::shuffle_artist(player, id.get_untracked(), band_data.get_untracked())
+                            title="Shuffle every track of every release, downloaded or not: what is missing streams from Bandcamp"><span class="hide-sm">"Shuffle"</span></Button>
                         <Button icon="rss" busy=actions.find_busy disabled=Signal::derive(move || artist.data.get().is_none())
                             on_click=move |_| if let Some(e) = entity() { actions.find_new(e) }
                             title=match band_url.get_untracked() { Some(u) if !u.is_empty() => format!("Check {u} for releases not yet harvested"), _ => "Search Bandcamp for this artist, verify the page against your releases, then check it".to_string() }>
