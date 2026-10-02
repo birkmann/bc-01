@@ -5,7 +5,9 @@
 //!   media keys (Now Playing on macOS).
 //! * Shows the UI in a window:
 //!   * Linux: a chromeless app window of an installed browser (`browser.rs`), with a tray
-//!     (StatusNotifierItem over D-Bus): show, play/pause, next, quit.
+//!     (StatusNotifierItem over D-Bus): show, play/pause, next, quit. With a Chromium-family
+//!     browser bc is an installed web app of the window profile, so its header can be the title
+//!     bar (`webapp.rs`).
 //!   * macOS: a native window with WebKit's web view (`macos.rs`) and a menu bar, so bc has its own
 //!     dock icon and needs no other browser.
 //! * Is single-instance. Launching it again while it runs just opens another window on the running
@@ -34,6 +36,8 @@ mod browser;
 mod login;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(not(target_os = "macos"))]
+mod webapp;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

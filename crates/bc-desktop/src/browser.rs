@@ -4,10 +4,11 @@
 //! private profile whose `userChrome.css` hides the tab strip and toolbars, else the default
 //! browser. Tray (StatusNotifierItem over D-Bus): show, play/pause, next, quit.
 
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ksni::TrayMethods;
 
@@ -154,21 +155,37 @@ fn open_window(url: &str) -> Option<Child> {
     }
 }
 
+/// The main window: bc installed as a web app of the profile when that works (its header can
+/// then replace the title strip, see `webapp.rs`), else a plain app window on `url`.
 fn chromium_cmd(browser: PathBuf, url: &str) -> Command {
     let profile = profile_dir("window-profile");
     let _ = std::fs::create_dir_all(&profile);
     quiet_profile(&profile);
-    let mut cmd = chromium_app(&browser, &profile, url);
+    let mut cmd = match crate::webapp::app_id(&browser, &profile, url) {
+        Some(id) => {
+            let mut cmd = chromium(&browser, &profile);
+            cmd.arg(format!("--app-id={id}"));
+            cmd
+        }
+        None => chromium_app(&browser, &profile, url),
+    };
     cmd.args(["--window-size=1360,860", "--autoplay-policy=no-user-gesture-required"]);
     cmd
 }
 
 /// A Chromium app window on `url` with its own profile, without the browser's prompts and with
-/// the window class `bc`. Shared by the main window and the Bandcamp sign-in window.
+/// the window class `bc`: the main window when bc is not an installed app, and the Bandcamp
+/// sign-in window.
 pub(crate) fn chromium_app(browser: &std::path::Path, profile: &std::path::Path, url: &str) -> Command {
+    let mut cmd = chromium(browser, profile);
+    cmd.arg(format!("--app={url}"));
+    cmd
+}
+
+/// The browser on `profile` with the flags every bc window shares.
+fn chromium(browser: &std::path::Path, profile: &std::path::Path) -> Command {
     let mut cmd = Command::new(browser);
-    cmd.arg(format!("--app={url}"))
-        .arg(format!("--user-data-dir={}", profile.display()))
+    cmd.arg(format!("--user-data-dir={}", profile.display()))
         .args(["--class=bc", "--name=bc", "--no-first-run", "--no-default-browser-check"])
         .args(["--disable-features=Translate,TranslateUI,MediaRouter"])
         // Distro/AUR builds of Chrome cannot self-update and nag "Chrome can't be updated" in
@@ -180,6 +197,44 @@ pub(crate) fn chromium_app(browser: &std::path::Path, profile: &std::path::Path,
         cmd.arg("--ozone-platform=x11");
     }
     cmd
+}
+
+/// Wait up to `grace` for the browser to exit, then kill it.
+pub(crate) fn reap(child: &mut Child, grace: Duration) {
+    let until = Instant::now() + grace;
+    while Instant::now() < until {
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// A close-on-exec pipe whose ends sit above fd 4, so moving the child's ends onto 3 and 4
+/// cannot overwrite one of them.
+pub(crate) fn pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
+    let mut fds = [0; 2];
+    // SAFETY: pipe2 fills two fds on success.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut out = [-1; 2];
+    for (i, fd) in fds.into_iter().enumerate() {
+        // SAFETY: fd is ours; the duplicate is close-on-exec, the original is closed right after.
+        out[i] = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 5) };
+        unsafe { libc::close(fd) };
+    }
+    if out.contains(&-1) {
+        let err = std::io::Error::last_os_error();
+        out.iter().filter(|fd| **fd >= 0).for_each(|fd| unsafe {
+            libc::close(*fd);
+        });
+        return Err(err);
+    }
+    // SAFETY: both are open fds owned by nothing else.
+    Ok(unsafe { (OwnedFd::from_raw_fd(out[0]), OwnedFd::from_raw_fd(out[1])) })
 }
 
 struct App {

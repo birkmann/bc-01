@@ -2,8 +2,10 @@
   "name": "bc",
   "short_name": "bc",
   "description": "Bandcamp library manager",
+  "id": "/",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay"],
   "background_color": "#080808",
   "theme_color": "#080808",
   "icons": [

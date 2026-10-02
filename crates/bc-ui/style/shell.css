@@ -98,6 +98,13 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
   .topbar.rail .brand-word { display: inline; }
 }
 @media (max-width: 640px) { .hb-hist, .hb-leds, .hb-clock, .topbar .hb-div, .topbar .brand-word { display: none; } }
+/* Desktop app with the title strip folded away (Window Controls Overlay): the header is the title
+   bar. It drags the window, its controls stay clickable, and it keeps clear of the browser's window
+   buttons, which sit in whatever part of the top edge the titlebar area leaves out. */
+@media (display-mode: window-controls-overlay) {
+  .topbar { -webkit-app-region: drag; app-region: drag; height: max(var(--header-h), env(titlebar-area-height, 0px)); padding-left: env(titlebar-area-x, 0px); padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
+  .topbar :is(a, button, input, .search, .hb-led) { -webkit-app-region: no-drag; app-region: no-drag; }
+}
 .offline-banner { background: color-mix(in srgb, var(--color-warn) 14%, var(--color-surface-2)); border-bottom: 1px solid color-mix(in srgb, var(--color-warn) 40%, transparent); padding: 6px 16px; font-size: var(--text-sm); display: flex; gap: 8px; align-items: center; color: var(--color-ink); }
 
 /* Right panels */

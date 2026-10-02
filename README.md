@@ -48,6 +48,9 @@ written in Rust and replaces an earlier Python/React version of bc.
 - **Recommendations.** Next up, similar tracks and taste, computed locally.
 - **Desktop and phone.** `bc-desktop` runs the server and opens the UI in a
   native window on macOS, or in a Chromium or Firefox app window on Linux.
+  With a Chromium-family browser, bc installs itself as a web app of its own
+  browser profile on first start. Click the chevron in the window's title strip
+  once and bc's header becomes the title bar.
   `bc-rust serve --lan` serves the UI to other devices on
   the local network after a one-time pairing.
 

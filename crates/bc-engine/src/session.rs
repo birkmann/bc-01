@@ -1358,8 +1358,9 @@ impl Session {
                     tracing::warn!("prime failed: {e}");
                     keep = false;
                 }
+                // a prime waits for the end of the current track: only one that never got ready times out
                 Some(Err(TryRecvError::Empty)) | None => {
-                    if p.began.elapsed() > LOAD_TIMEOUT {
+                    if !p.ready && p.began.elapsed() > LOAD_TIMEOUT {
                         keep = false;
                     }
                 }
@@ -1371,6 +1372,10 @@ impl Session {
                     self.arm_gapless(&p);
                 }
                 self.primed = Some(p);
+            } else {
+                // drop it in the audio thread too, or the mixer splices into a deck we forgot
+                self.primed = Some(p);
+                self.invalidate_prime();
             }
         }
     }
@@ -1696,14 +1701,24 @@ impl Session {
 
     /// The spliced gapless hand-over happened inside the audio callback.
     fn on_gapless(&mut self, to: usize) {
-        let Some(p) = self.primed.take() else {
-            return;
+        // The audio already plays `to`: follow it even if the prime's bookkeeping was lost,
+        // or the clock, waveform and title stay on the finished track.
+        let (idx, start_s) = match self.primed.take() {
+            Some(p) if p.deck == to => (p.idx, p.start_s),
+            other => {
+                self.primed = other;
+                self.invalidate_prime();
+                let uid = self.decks[to].as_ref().map(|d| d.uid);
+                match uid.and_then(|u| self.st.queue.iter().position(|t| t.uid == u)) {
+                    Some(i) => (i, 0.0),
+                    None => {
+                        tracing::warn!(deck = to, "gapless advance into a deck with no queued track");
+                        return;
+                    }
+                }
+            }
         };
-        if p.deck != to {
-            return;
-        }
         // the same bookkeeping as next(auto) without loading anything
-        let idx = p.idx;
         if self.st.shuffle {
             self.shuffle_unplayed.retain(|i| *i != idx);
         }
@@ -1726,7 +1741,7 @@ impl Session {
         self.mix_fired = false;
         self.early_run = -1;
         self.counted_play = false;
-        self.started_at_s = p.start_s;
+        self.started_at_s = start_s;
         self.st.mix_out_override_s = None;
         self.st.error = None;
         self.st.status = PlayerStatus::Playing;
@@ -2946,6 +2961,40 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    #[test]
+    fn a_prime_armed_longer_than_the_load_timeout_still_follows_the_gapless_advance() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = vec![wav(dir.path(), "a.wav", 4.0), wav(dir.path(), "b.wav", 2.0)];
+        let cfg = SessionConfig { output: OutputKind::Null { sample_rate: 48_000, block: 256, speed: 2.0, capture: None, cue: None }, mpris: false, ..Default::default() };
+        let mut s = Session::new(FilePorts::new(files).into_ports(), Box::new(NullPublisher), cfg);
+        play(&mut s, 2);
+        let t0 = Instant::now();
+        while !s.primed.as_ref().map(|p| p.armed).unwrap_or(false) {
+            assert!(t0.elapsed() < Duration::from_secs(10), "the next track was never primed");
+            s.tick();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(s.st.queue_index, 0);
+        // a long track: the prime has waited for its end far longer than a load may take
+        if let Some(p) = s.primed.as_mut() {
+            p.began = Instant::now() - LOAD_TIMEOUT - Duration::from_secs(1);
+        }
+        let t1 = Instant::now();
+        while s.st.queue_index != 1 {
+            assert!(
+                t1.elapsed() < Duration::from_secs(10),
+                "stuck on the finished track: clock {:?}, events {:?}",
+                s.clock_now(),
+                s.event_log
+            );
+            s.tick();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(s.event_log.iter().any(|e| matches!(e, bc_dsp::mixer::Event::Advanced { .. })), "spliced gaplessly");
+        assert_eq!(s.st.current.as_ref().map(|c| c.uid), Some(s.st.queue[1].uid));
+        assert_eq!(s.clock_now().track_uid, Some(s.st.queue[1].uid), "the clock follows the new track");
     }
 
     #[test]

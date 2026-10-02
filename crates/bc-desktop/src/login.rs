@@ -11,10 +11,10 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use bc_types::bandcamp::BandcampLoginState;
 
-use crate::browser::{Browser, chromium_app, find_browser, profile_dir, quiet_profile};
+use crate::browser::{Browser, chromium_app, find_browser, pipe, profile_dir, quiet_profile, reap};
 use crate::{BANDCAMP_LOGIN_URL, Core, bandcamp_cookie_header};
 
 /// A sign-in window is open (the browser cannot be raised from outside, so a second request
@@ -93,45 +93,7 @@ fn quiet(cmd: &mut Command) -> &mut Command {
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
 }
 
-/// Wait up to `grace` for the browser to exit, then kill it.
-fn reap(child: &mut Child, grace: Duration) {
-    let until = Instant::now() + grace;
-    while Instant::now() < until {
-        if !matches!(child.try_wait(), Ok(None)) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 // -- Chromium ---------------------------------------------------------------------------
-
-/// A close-on-exec pipe whose ends sit above fd 4, so moving the child's ends onto 3 and 4
-/// cannot overwrite one of them.
-fn pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
-    let mut fds = [0; 2];
-    // SAFETY: pipe2 fills two fds on success.
-    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let mut out = [-1; 2];
-    for (i, fd) in fds.into_iter().enumerate() {
-        // SAFETY: fd is ours; the duplicate is close-on-exec, the original is closed right after.
-        out[i] = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 5) };
-        unsafe { libc::close(fd) };
-    }
-    if out.contains(&-1) {
-        let err = std::io::Error::last_os_error();
-        out.iter().filter(|fd| **fd >= 0).for_each(|fd| unsafe {
-            libc::close(*fd);
-        });
-        return Err(err);
-    }
-    // SAFETY: both are open fds owned by nothing else.
-    Ok(unsafe { (OwnedFd::from_raw_fd(out[0]), OwnedFd::from_raw_fd(out[1])) })
-}
 
 fn chromium(core: &Core, rt: &tokio::runtime::Handle, browser: &Path) -> Result<bool, String> {
     let profile = fresh_profile("bandcamp-login").map_err(|e| e.to_string())?;
