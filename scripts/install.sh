@@ -41,8 +41,8 @@ if [[ -z "$DESTDIR" ]]; then
 fi
 
 echo "Installed to $root. Run: bc-desktop   (or: bc-rust serve, then open http://127.0.0.1:8420)"
-if ! command -v google-chrome-stable chromium brave google-chrome brave-browser microsoft-edge-stable vivaldi-stable >/dev/null 2>&1; then
-    echo "Note: bc-desktop opens its window in a Chromium-family browser (chromium, google-chrome, brave, …); none was found."
+if ! command -v google-chrome-stable chromium brave google-chrome brave-browser microsoft-edge-stable vivaldi-stable firefox librewolf >/dev/null 2>&1; then
+    echo "Note: bc-desktop opens its window in a Chromium-family browser (chromium, google-chrome, brave, …) or Firefox; none was found."
 fi
 if [[ -z "$DESTDIR" && ":$PATH:" != *":$PREFIX/bin:"* ]]; then
     echo "Note: $PREFIX/bin is not on your PATH."
