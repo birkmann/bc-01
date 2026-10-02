@@ -190,26 +190,27 @@ pub fn WaveCanvas(
     let duration = StoredValue::new(0.0f64);
     on_cleanup(move || alive.set_value(false));
 
-    // create the view once the canvas exists
+    // Create the view once the canvas exists. Only the canvas is tracked (the theme effect below
+    // handles colours). The resize observer is attached on every run because a re-run disconnects
+    // the previous one: a view left without it keeps a stale width and maps clicks to wrong times.
     Effect::new(move |_| {
         let Some(c) = canvas.get() else { return };
-        if view.with_value(|v| v.is_some()) {
-            return;
-        }
         let el: web_sys::HtmlCanvasElement = c.unchecked_into();
-        if let Ok(v) = WaveformView::new(el.clone()) {
+        if view.with_value(|v| v.is_none()) {
+            let Ok(v) = WaveformView::new(el.clone()) else { return };
             let v = Rc::new(RefCell::new(v));
-            v.borrow_mut().set_theme(wave_theme(&resolve_colors(&theme.active())));
-            view.set_value(Some(v.clone()));
-            let size = move |w: f64, h: f64| {
-                let dpr = crate::util::window().device_pixel_ratio();
-                v.borrow_mut().resize(w, h, dpr);
-                dirty.set_value(true);
-            };
-            let disconnect = crate::util::observe_resize(el.unchecked_ref(), size);
-            let guard = send_wrapper::SendWrapper::new(disconnect);
-            on_cleanup(move || (guard.take())());
+            v.borrow_mut().set_theme(wave_theme(&resolve_colors(&theme.active_untracked())));
+            view.set_value(Some(v));
         }
+        let Some(v) = view.with_value(|v| v.clone()) else { return };
+        let size = move |w: f64, h: f64| {
+            let dpr = crate::util::window().device_pixel_ratio();
+            v.borrow_mut().resize(w, h, dpr);
+            dirty.set_value(true);
+        };
+        let disconnect = crate::util::observe_resize(el.unchecked_ref(), size);
+        let guard = send_wrapper::SendWrapper::new(disconnect);
+        on_cleanup(move || (guard.take())());
     });
 
     // theme -> colours

@@ -46,22 +46,6 @@ written in Rust and replaces an earlier Python/React version of bc.
   Chromium app window. `bc-rust serve --lan` serves the UI to other devices on
   the local network after a one-time pairing.
 
-## Performance
-
-Compared with the previous Python/React version on the same database and
-disk.
-
-| | Previous app | bc |
-|---|---|---|
-| Start to ready | ≈110 s | 1.5 s |
-| 200 tracks at offset 74,000 | 490–560 ms | 13–19 ms |
-| Track list | 500 rows, sorted in the browser | all rows, sorted on the server |
-| Search (`d`, `dub`, `dub techno`) | 280–520 ms | 25–41 ms |
-| Scrolling the full list | — | 53–60 fps |
-| Rescan of the whole library, nothing changed | — | 0.71 s |
-| Similar tracks, typical / worst seed | 118 / 223 ms | 67 / 194 ms |
-| Beatmatch phase error (PipeWire, real device) | — | −0.05 ms, 0 xruns |
-
 ## Installing
 
 Requirements: Rust (stable) with the `wasm32-unknown-unknown` target, `trunk`,
