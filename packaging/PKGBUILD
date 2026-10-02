@@ -1,6 +1,6 @@
 # Local build of the bc-rust workspace from the repository checkout (this file lives in packaging/).
 pkgname=bc-rust
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Native Rust Bandcamp library manager and DJ tool (in-process server + audio engine, UI in a Chromium app window)'
 arch=('x86_64')

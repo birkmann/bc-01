@@ -53,7 +53,7 @@ try {
 <main id="main">
 
 <section class="wrap hero" id="top">
-  <span class="label">mac &amp; linux · free · v0.1.0</span>
+  <span class="label">mac &amp; linux · free · v0.1.1</span>
   <h1>Music library<br>and player</h1>
   <div class="hero-copy">
     <p class="lead">Play and organise the music you own. Discover new releases on Bandcamp and download what you buy straight into your collection.</p>
@@ -160,13 +160,9 @@ try {
       </div>
       <div class="platform" id="linux">
         <h3>Linux</h3>
-        <p>There's no ready-made download for Linux yet. If you're comfortable with the terminal, these commands build and install bc for your user:</p>
-        <div class="code" role="group" aria-label="Install commands">
-          <pre><code><span class="prompt">$</span> git clone https://github.com/birkmann/bc-01.git bc
-<span class="prompt">$</span> cd bc &amp;&amp; ./scripts/install.sh
-<span class="prompt">$</span> bc-desktop</code></pre>
-          <button class="copy-btn" type="button" data-copy="git clone https://github.com/birkmann/bc-01.git bc &amp;&amp; cd bc &amp;&amp; ./scripts/install.sh">Copy</button>
-        </div>
+        <p>For 64-bit PCs on most current distributions. Download the file, allow it to run and open it. bc opens its window in Chromium, Google Chrome, Brave or Firefox, so one of them needs to be installed.</p>
+        <a class="pill pill-signal" href="https://github.com/birkmann/bc-01/releases/latest/download/bc-linux-x86_64.AppImage">Download for Linux</a>
+        <p class="note">To allow it to run, right-click the file, open Properties and turn on <b>Allow executing file as program</b>, or run <code>chmod +x bc-linux-x86_64.AppImage</code>. If it still doesn't open, install <code>libfuse2</code>.</p>
       </div>
     </div>
     <div class="install-more">
@@ -179,8 +175,8 @@ try {
         <p>Arch users can install the included package with <code>cd packaging &amp;&amp; makepkg -si</code>.</p>
       </div>
       <div>
-        <h3>Developers</h3>
-        <p>bc is written in Rust. Build instructions and technical details are in the manual on GitHub.</p>
+        <h3>Build it yourself</h3>
+        <p>bc is written in Rust. In a copy of the source, <code>./scripts/install.sh</code> builds and installs it for your user. Requirements and technical details are in the manual on GitHub.</p>
       </div>
     </div>
     <div class="actions">

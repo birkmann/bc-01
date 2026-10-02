@@ -53,7 +53,10 @@ written in Rust and replaces an earlier Python/React version of bc.
 
 ## Installing
 
-On Linux. Requirements: Rust (stable) with the `wasm32-unknown-unknown` target, `trunk`,
+On Linux, download `bc-linux-x86_64.AppImage` from the latest GitHub release,
+make it executable (`chmod +x`) and run it. It needs a Chromium-family browser
+or Firefox for the app window, and `libfuse2` on distributions that do not ship
+it. To build from source instead, the requirements are: Rust (stable) with the `wasm32-unknown-unknown` target, `trunk`,
 `wasm-bindgen`, `brotli`, `clang`, `pkgconf`, and the ALSA, OpenSSL and D-Bus
 development files. At runtime: a Chromium-family browser (Chromium, Google
 Chrome, Brave, Edge or Vivaldi) or Firefox for the app window, and optionally
@@ -68,8 +71,10 @@ On Arch Linux, `makepkg -si` in `packaging/` builds and installs a package
 (`bc-desktop`, the `bc-rust` command line tool and the icons). The command
 line tool is called `bc-rust` because `bc` is the GNU calculator.
 
-The release workflow (`.github/workflows/release.yml`) builds the macOS disk
-image and attaches it to the GitHub release of every `v*` tag; it can also be
+`./packaging/appimage/build-appimage.sh` builds the AppImage
+(`target/appimage/bc-linux-x86_64.AppImage`). The release workflow
+(`.github/workflows/release.yml`) builds the macOS disk image and the AppImage
+and attaches them to the GitHub release of every `v*` tag; it can also be
 started by hand from the Actions tab.
 
 ### macOS

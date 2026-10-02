@@ -3,3 +3,5 @@ crates/bc-ui/dist
 e2e/node_modules
 .vscode/
 *.dmg
+/packaging/appimage/tools/
+*.AppImage
