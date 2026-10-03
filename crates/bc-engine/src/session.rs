@@ -246,6 +246,8 @@ pub struct Session {
     /// parks it, so it must not be primed for the next track before that.
     parking: Option<usize>,
     parking_since: Instant,
+    /// Since when the mixer has been paused while the session says Playing (see `tick_stuck_pause`).
+    stuck_paused_since: Option<Instant>,
     /// The last engine events (bounded), for tests and diagnostics.
     pub event_log: Vec<Event>,
 }
@@ -319,6 +321,7 @@ impl Session {
             pending_transition_ids: (None, None),
             parking: None,
             parking_since: Instant::now(),
+            stuck_paused_since: None,
             event_log: Vec::new(),
         };
         s.refresh_devices(false);
@@ -372,6 +375,7 @@ impl Session {
         self.process_engine_events();
         self.tick_loading();
         self.tick_parking();
+        self.tick_stuck_pause();
         self.tick_preview();
         self.tick_position();
         self.maybe_fill();
@@ -1453,10 +1457,15 @@ impl Session {
             _ => false,
         };
         if l.autoplay {
-            // pressing a track while paused plays it (the browser's behaviour)
-            if self.paused_by_user {
+            // pressing a track while paused plays it (the browser's behaviour). Ask the mixer,
+            // not only `paused_by_user`: a preview pauses it too, and a deck started inside a
+            // paused mixer reports Started while staying silent.
+            let mixer_paused = self.engine.as_ref().map(|e| e.snapshot().paused).unwrap_or(false);
+            if self.paused_by_user || mixer_paused {
                 self.send(Cmd::Resume);
                 self.paused_by_user = false;
+                // the main track was started on purpose: the preview's end must not touch it
+                self.resume_main_after_preview = false;
             }
             match (&l.spec, out, out_playing) {
                 (Some(spec), Some(o), true) if o != deck => {
@@ -1780,6 +1789,24 @@ impl Session {
         if !running {
             self.parking = None;
             self.prime_next();
+        }
+    }
+
+    /// Playing over a paused mixer is never intended: the bar shows Pause while nothing moves
+    /// and nothing sounds. Whatever path got there, resume the mixer instead of sitting in it.
+    fn tick_stuck_pause(&mut self) {
+        let paused = self.engine.as_ref().map(|e| e.snapshot().paused).unwrap_or(false);
+        if self.st.status != PlayerStatus::Playing || !paused {
+            self.stuck_paused_since = None;
+            return;
+        }
+        // a Resume just sent is still on its way to the audio thread
+        let since = *self.stuck_paused_since.get_or_insert_with(Instant::now);
+        if since.elapsed() >= Duration::from_millis(250) {
+            tracing::warn!("player: mixer paused while playing; resuming");
+            self.send(Cmd::Resume);
+            self.paused_by_user = false;
+            self.stuck_paused_since = None;
         }
     }
 

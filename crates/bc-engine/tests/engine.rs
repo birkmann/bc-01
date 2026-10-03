@@ -293,3 +293,24 @@ fn skipping_around_with_mix_on_never_underruns() {
     let xruns = r.session.engine_snapshot().unwrap().xruns;
     assert_eq!(xruns, 0, "underruns while skipping; events: {:#?}", r.session.event_log);
 }
+
+#[test]
+fn starting_a_track_during_a_preview_unpauses_the_main_output() {
+    // Without a cue device a preview pauses the main mix. Starting a track from there must
+    // resume it: the deck used to "start" inside the paused mixer, the session reported
+    // Playing and the clock sat still in silence.
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.wav"), dir.path().join("b.wav"));
+    click_wav(&a, 120.0, 0.0, 30.0, 44_100);
+    click_wav(&b, 120.0, 0.0, 30.0, 44_100);
+    let mut r = rig(vec![a, b], None, 4.0);
+    let items = r.items(2);
+    r.cmd(PlayerCommand::PlayQueue { items: items.clone(), start_index: 0, source: None });
+    r.until("playing", |s| s.st.status == PlayerStatus::Playing && s.clock_now().position_s > 1.0);
+    r.cmd(PlayerCommand::PreviewStart { item: items[1].clone(), at_s: Some(0.0) });
+    r.until("main paused for the preview", |s| s.engine_snapshot().is_some_and(|x| x.paused));
+    r.cmd(PlayerCommand::JumpTo { index: 1 });
+    r.until("second track playing", |s| s.st.status == PlayerStatus::Playing && s.st.queue_index == 1);
+    r.until("clock moving", |s| s.clock_now().playing && s.clock_now().position_s > 1.0);
+    assert!(!r.session.engine_snapshot().unwrap().paused);
+}
