@@ -72,7 +72,10 @@
 .lib-grid-wrap .cg-body { margin: 0 20px; }
 .lib-grid-wrap .cg-scroll > .empty { margin: 0 20px; }
 .alb { position: relative; display: block; min-width: 0; border-radius: var(--radius-lg); }
-.alb-cover { position: relative; border-radius: var(--radius-md); overflow: hidden; box-shadow: 0 1px 0 var(--color-line-subtle), 0 6px 14px -10px rgb(0 0 0 / .6); transition: box-shadow var(--dur-base) var(--ease), transform var(--dur-base) var(--ease); }
+/* The hover transform makes the cover a stacking context, which would sink .alb-play under .alb-link:
+   lift the cover above the link and let clicks fall through to it, except on the play button. */
+.alb-cover { position: relative; z-index: 2; pointer-events: none; border-radius: var(--radius-md); overflow: hidden; box-shadow: 0 1px 0 var(--color-line-subtle), 0 6px 14px -10px rgb(0 0 0 / .6); transition: box-shadow var(--dur-base) var(--ease), transform var(--dur-base) var(--ease); }
+.alb.bc .alb-cover { pointer-events: auto; } /* whole card is the link: keep the badge tooltip */
 .alb-cover .art { border-radius: 0; }
 .alb:hover .alb-cover { transform: translateY(-2px); box-shadow: 0 1px 0 var(--color-line), 0 12px 22px -12px rgb(0 0 0 / .75); }
 .alb.cur .alb-cover { box-shadow: var(--glow); }
@@ -92,7 +95,7 @@
 .ent-link:hover { color: var(--color-ink); text-decoration: underline; }
 .alb-link { position: absolute; inset: 0; z-index: 1; border-radius: var(--radius-lg); }
 .alb-play, .alb-more { position: absolute; z-index: 2; display: grid; place-items: center; border-radius: 50%; transition: opacity var(--dur-fast), transform var(--dur-fast), background var(--dur-fast); }
-.alb-play { right: 8px; bottom: 8px; width: 40px; height: 40px; background: var(--color-accent); color: var(--color-accent-ink); box-shadow: var(--shadow-pop); }
+.alb-play { pointer-events: auto; right: 8px; bottom: 8px; width: 40px; height: 40px; background: var(--color-accent); color: var(--color-accent-ink); box-shadow: var(--shadow-pop); }
 .alb-play:hover { background: var(--color-accent-hover); }
 .alb-play .icon { margin-left: 1px; }
 .alb-more { top: 6px; right: 6px; width: 30px; height: 30px; background: color-mix(in srgb, var(--color-surface-1) 80%, transparent); color: var(--color-ink); backdrop-filter: blur(6px); }
