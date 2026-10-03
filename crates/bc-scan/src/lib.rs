@@ -4,10 +4,14 @@
 //! * [`ingest`] - DB-side ingest (idempotent) and the public API for the download worker:
 //!   [`ingest::ingest_paths`], [`ingest::ingest_dir`], [`ingest::root_for_path`].
 //! * [`watcher`] - hot-root filesystem watcher.
+//! * [`excluded`] - files removed from the library (kept on disk) and restoring them.
 //! * [`art`] - legacy cover conversion job and on-demand conversion.
 //! * [`roots`] / [`routes`] - roots CRUD, `ensure_roots`, `router(ctx)`.
+//! * [`browse`] - the folder picker behind `GET /library/browse`.
 
 pub mod art;
+pub mod browse;
+pub mod excluded;
 pub mod ingest;
 pub mod media;
 pub mod roots;

@@ -101,6 +101,47 @@ To build it yourself (Rust with the `wasm32-unknown-unknown` target, `trunk`,
 ./packaging/macos/build-app.sh  # → target/macos/bc.app and bc-macos-arm64.dmg
 ```
 
+### Uninstalling
+
+Quit bc first. Then remove the app the way it was installed:
+
+```sh
+# AppImage: delete the file
+rm ~/Downloads/bc-linux-x86_64.AppImage   # wherever you put it
+
+# scripts/install.sh (use the same PREFIX, and sudo, if you changed it)
+PREFIX=~/.local
+rm -f "$PREFIX"/bin/{bc-desktop,bc-rust,bc-analysis-tool} \
+      "$PREFIX"/share/applications/bc.desktop \
+      "$PREFIX"/share/icons/hicolor/*/apps/bc.{png,svg}
+rm -rf "$PREFIX"/share/licenses/bc-rust
+
+# Arch package
+sudo pacman -R bc-rust
+
+# macOS
+rm -rf /Applications/bc.app
+```
+
+This leaves your library database, settings, caches and downloads in place,
+so a later install picks up where you left off. To remove those as well (this
+deletes `library.db` and everything under `BC_DATA_DIR`, including downloads
+unless `BC_DOWNLOAD_DIR` points elsewhere; your own music folders are not
+touched):
+
+```sh
+# Linux
+rm -rf ~/.local/share/bc-rust            # data, caches, backups, browser profiles
+# the launcher entry Chromium created for the bc web app, if any
+grep -l 'bc-rust/window-profile' ~/.local/share/applications/*.desktop | xargs -r rm
+secret-tool clear service bc-rust        # Bandcamp sign-in in the keyring
+
+# macOS
+rm -rf ~/Library/Application\ Support/bc-rust \
+       ~/Library/Caches/io.github.birkmann.bc ~/Library/WebKit/io.github.birkmann.bc
+security delete-generic-password -s bc-rust   # Bandcamp sign-in in the Keychain
+```
+
 ## Using it
 
 1. Open **Settings → Library** and add the folder that holds your music. It

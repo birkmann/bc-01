@@ -362,6 +362,7 @@
 .hm-wel-dl .mono { max-width: 100%; }
 .hm-wel-scan { display: flex; flex-direction: column; gap: 6px; }
 .hm-wel-scan-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
+.hm-wel-scan-end { display: inline-flex; align-items: center; gap: 10px; }
 .hm-wel-fine { font-size: var(--text-xs); line-height: 1.5; }
 .hm-wel-fine code { padding: 0 3px; border-radius: var(--radius-sm); background: var(--color-surface-3); }
 .hm-wel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: auto; }

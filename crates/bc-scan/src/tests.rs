@@ -317,12 +317,65 @@ fn scan_paths_ingests_and_marks() {
 }
 
 #[test]
+fn removed_tracks_keep_their_files_stay_out_of_scans_and_can_be_restored() {
+    let e = env();
+    let (rid, m) = lib(&e);
+    scan(&e, rid);
+    let ids = |sql: &str| -> Vec<i64> {
+        e.ctx.read(|c| Ok(c.prepare(sql)?.query_map([], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?)).unwrap()
+    };
+    // untagged, so all four share one release; three go, the release stays
+    let gone = ids("SELECT track_id FROM files WHERE path NOT LIKE '%Oxide Bloom/02%'");
+    assert_eq!(gone.len(), 3);
+    let out = bc_maint::delete::remove_tracks(&e.ctx, &gone).unwrap();
+    assert_eq!((out.tracks, out.releases, out.excluded), (3, 0, 3));
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM tracks"), 1);
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM releases"), 1);
+    let f = m.join("Somatic/Grid Failure/01 - t1.mp3");
+    assert!(f.is_file(), "the file stays on disk");
+
+    // neither a full scan, nor the watcher, nor an explicit ingest brings them back
+    let r = scan(&e, rid);
+    assert_eq!((r.files_seen, r.files_added, r.files_missing), (1, 0, 0));
+    let r = scan_paths(&e.ctx, rid, &[m.join("Somatic")]).unwrap();
+    assert_eq!(r.files_added, 0);
+    ingest_paths(&e.ctx, rid, std::slice::from_ref(&f), &IngestOptions::default()).unwrap();
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM tracks"), 1);
+
+    // the last track takes the release with it
+    let out = bc_maint::delete::remove_tracks(&e.ctx, &ids("SELECT id FROM tracks")).unwrap();
+    assert_eq!((out.tracks, out.releases), (1, 1));
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM releases"), 0);
+    assert_eq!(scan(&e, rid).files_added, 0);
+
+    // restoring lifts the exclusion and ingests straight away
+    let listed = e.ctx.read(bc_maint::excluded::list).unwrap();
+    assert_eq!(listed.len(), 4);
+    assert!(listed.iter().all(|x| !x.title.is_empty()), "the list names what was removed: {listed:?}");
+    let paths: Vec<String> = listed.into_iter().map(|x| x.path).collect();
+    let r = crate::excluded::restore(&e.ctx, &paths).unwrap();
+    assert_eq!((r.restored, r.tracks_added), (4, 4));
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM tracks"), 4);
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM excluded_files"), 0);
+}
+
+#[test]
 fn cancel_stops_before_marking() {
     let e = env();
-    let (rid, _) = lib(&e);
+    let (rid, m) = lib(&e);
     let cancel = AtomicBool::new(true);
     let r = scan_root(&e.ctx, rid, ScanHooks { progress: None, cancel: &cancel }).unwrap();
+    assert_eq!((r.files_missing, r.tracks_added), (0, 0));
+    assert_eq!(scalar(&e.ctx, "SELECT last_scan_at IS NULL FROM library_roots"), 1, "a stopped scan is no scan");
+
+    // after a full scan, a stopped rescan neither marks the vanished folder nor moves last_scan_at
+    scan(&e, rid);
+    e.ctx.write(|tx| Ok(tx.execute("UPDATE library_roots SET last_scan_ms = -1", [])?)).unwrap();
+    std::fs::remove_dir_all(m.join("Somatic")).unwrap();
+    let r = scan_root(&e.ctx, rid, ScanHooks { progress: None, cancel: &cancel }).unwrap();
     assert_eq!(r.files_missing, 0);
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM files WHERE missing_since IS NOT NULL"), 0);
+    assert_eq!(scalar(&e.ctx, "SELECT last_scan_ms FROM library_roots"), -1);
 }
 
 // ---------------------------------------------------------------- roots

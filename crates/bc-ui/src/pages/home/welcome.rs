@@ -16,6 +16,7 @@ use crate::api;
 use crate::data::{QuerySpec, use_query, use_topic};
 use crate::ds::{BrandMark, Button, Icon, Meter, Variant};
 use crate::logic::format::format_count;
+use crate::widgets::FolderPicker;
 
 #[component]
 pub fn Welcome(
@@ -189,27 +190,37 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
     let scanning = RwSignal::new(false);
     let progress = RwSignal::new(None::<ScanProgress>);
     let note = RwSignal::new(None::<String>);
+    // the running scan, for Stop (from the start response, or from progress if it began elsewhere)
+    let job = RwSignal::new(None::<String>);
+    let stopping = RwSignal::new(false);
 
     use_topic::<ScanProgress>("library.scan.progress", move |p| {
         scanning.set(true);
+        job.set(Some(p.job_id.clone()));
         progress.set(Some(p));
     });
     use_topic::<serde_json::Value>("library.scan.done", move |v| {
-        let job = v.get("job_id").and_then(|j| j.as_str()).map(str::to_string);
+        let id = v.get("job_id").and_then(|j| j.as_str()).map(str::to_string);
+        let cancelled = v.get("cancelled").and_then(|c| c.as_bool()).unwrap_or(false);
         spawn_local(async move {
-            let status = match job {
+            let status = match id {
                 Some(id) => api::get::<ScanStatus>(&format!("/library/scan/{id}")).await.ok(),
                 None => None,
             };
             let _ = scanning.try_set(false);
             let _ = progress.try_set(None);
+            let _ = job.try_set(None);
+            let _ = stopping.try_set(false);
             reload_roots();
-            match status.map(|s| logic::scan_outcome(&s.results)) {
+            match status.map(|s| logic::scan_outcome(&s.results, cancelled || s.state == "cancelled")) {
                 Some(logic::ScanOutcome::Empty { seen }) => {
                     let _ = note.try_set(Some(logic::empty_scan_note(seen)));
                 }
                 Some(logic::ScanOutcome::Errors(e)) => {
                     let _ = note.try_set(Some(e));
+                }
+                Some(logic::ScanOutcome::Stopped) => {
+                    let _ = note.try_set(Some(logic::STOPPED_SCAN_NOTE.into()));
                 }
                 _ => on_filled.run(()),
             }
@@ -224,9 +235,23 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
             None => "/library/scan".to_string(),
         };
         spawn_local(async move {
-            if let Err(e) = api::post::<_, Accepted>(&url, &serde_json::json!({})).await {
-                scanning.set(false);
-                error.set(Some(e.message()));
+            match api::post::<_, Accepted>(&url, &serde_json::json!({})).await {
+                Ok(a) => job.set(Some(a.job_id)),
+                Err(e) => {
+                    scanning.set(false);
+                    error.set(Some(e.message()));
+                }
+            }
+        });
+    };
+    // Stops between files: what is in stays in, and `library.scan.done` settles the card.
+    let stop = move |_| {
+        let Some(id) = job.get_untracked() else { return };
+        stopping.set(true);
+        spawn_local(async move {
+            if let Err(e) = api::post::<_, Accepted>(&format!("/library/scan/{id}/cancel"), &serde_json::json!({})).await {
+                let _ = stopping.try_set(false);
+                crate::ds::toast_err(&e.message());
             }
         });
     };
@@ -252,6 +277,7 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
     };
     let add2 = add.clone();
     let has_roots = Memo::new(move |_| roots.with(|r| !r.is_empty()));
+    let picking = RwSignal::new(false);
 
     view! {
         <div class="hm-wel-card primary">
@@ -284,11 +310,18 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
             {move || scanning.get().then(|| {
                 let p = progress.get();
                 let value = p.as_ref().and_then(|p| p.total.filter(|t| *t > 0).map(|t| p.seen as f64 / t as f64));
+                let phase = logic::scan_phase_label(p.as_ref().map(|p| p.phase.as_str()));
                 view! {
                     <div class="hm-wel-scan" role="status" aria-live="polite">
                         <div class="hm-wel-scan-row">
-                            <span>{logic::scan_phase_label(p.as_ref().map(|p| p.phase.as_str()))}</span>
-                            <span class="mono faint">{p.as_ref().map(|p| logic::scan_count(p.seen, p.total)).unwrap_or_default()}</span>
+                            <span>{move || if stopping.get() { "Stopping\u{2026}" } else { phase }}</span>
+                            <span class="hm-wel-scan-end">
+                                <span class="mono faint">{p.as_ref().map(|p| logic::scan_count(p.seen, p.total)).unwrap_or_default()}</span>
+                                <button type="button" class="hm-pill" title="Stop the scan; tracks already added stay in the library"
+                                    disabled=move || stopping.get() || job.get().is_none() on:click=stop>
+                                    <Icon name="x" size=11 />"Stop"
+                                </button>
+                            </span>
                         </div>
                         <Meter value=value label="Scan progress" />
                     </div>
@@ -311,10 +344,14 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
                     placeholder=move || if has_roots.get() { "Add another folder, e.g. /Volumes/Music" } else { "~/Music" }
                     prop:value=move || path.get() on:input=move |ev| path.set(event_target_value(&ev))
                     on:keydown=move |ev| if ev.key() == "Enter" { add2() } />
+                <Button icon="folder" title="Pick a folder on the machine running bc" disabled=Signal::derive(move || scanning.get())
+                    on_click=move |_| picking.set(true)>"Browse\u{2026}"</Button>
                 <Button variant=Variant::Primary icon="plus" busy=adding
                     disabled=Signal::derive(move || path.get().trim().is_empty() || scanning.get())
                     on_click=move |_| add()>"Add and scan"</Button>
             </div>
+            <FolderPicker open=picking start=Signal::derive(move || path.get()) title="Choose your music folder"
+                on_pick=Callback::new(move |p| path.set(p)) />
             {move || error.get().map(|e| view! { <p class="sys-notice danger" role="alert"><Icon name="alert" />{e}</p> })}
             <p class="faint hm-wel-fine">"Paths are on the machine running bc; "<code class="mono">"~"</code>" is its home folder. Watch folders and rescans live in "<a class="lib-link" href="/settings?tab=library">"Settings \u{203a} Library"</a>"."</p>
         </div>

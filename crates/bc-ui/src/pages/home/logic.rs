@@ -86,9 +86,17 @@ pub enum ScanOutcome {
     Empty { seen: i64 },
     /// Nothing went in and the scan reported why (the first error).
     Errors(String),
+    /// Stopped before any track went in.
+    Stopped,
 }
 
-pub fn scan_outcome(results: &[ScanResult]) -> ScanOutcome {
+/// `cancelled`: the scan was stopped, so only tracks written count (`files_added` is what the
+/// walk found, not what was read).
+pub fn scan_outcome(results: &[ScanResult], cancelled: bool) -> ScanOutcome {
+    if cancelled {
+        let written: i64 = results.iter().map(|r| r.tracks_added).sum();
+        return if written > 0 { ScanOutcome::Filled } else { ScanOutcome::Stopped };
+    }
     let added: i64 = results.iter().map(|r| r.tracks_added + r.files_added + r.files_updated).sum();
     if added > 0 {
         return ScanOutcome::Filled;
@@ -105,6 +113,8 @@ pub fn empty_scan_note(seen: i64) -> String {
         n => format!("Found {} audio file{}, but none were added. Settings \u{203a} Library has the scan details.", format_count(n), if n == 1 { "" } else { "s" }),
     }
 }
+
+pub const STOPPED_SCAN_NOTE: &str = "Scan stopped before anything was added. Scan the folder again whenever you\u{2019}re ready.";
 
 pub fn scan_phase_label(phase: Option<&str>) -> &'static str {
     match phase {
@@ -178,10 +188,15 @@ mod tests {
 
     #[test]
     fn scan_outcomes() {
-        assert_eq!(scan_outcome(&[result(10, 4, &["bad.mp3: no frames"])]), ScanOutcome::Filled);
-        assert_eq!(scan_outcome(&[result(3, 0, &[])]), ScanOutcome::Empty { seen: 3 });
-        assert_eq!(scan_outcome(&[]), ScanOutcome::Empty { seen: 0 });
-        assert!(matches!(scan_outcome(&[result(3, 0, &["permission denied"])]), ScanOutcome::Errors(e) if e.contains("permission denied")));
+        assert_eq!(scan_outcome(&[result(10, 4, &["bad.mp3: no frames"])], false), ScanOutcome::Filled);
+        assert_eq!(scan_outcome(&[result(3, 0, &[])], false), ScanOutcome::Empty { seen: 3 });
+        assert_eq!(scan_outcome(&[], false), ScanOutcome::Empty { seen: 0 });
+        assert!(matches!(scan_outcome(&[result(3, 0, &["permission denied"])], false), ScanOutcome::Errors(e) if e.contains("permission denied")));
+        // stopped: walked-but-unwritten files do not count, written tracks do
+        let walked = ScanResult { files_added: 500, tracks_added: 0, ..result(500, 0, &[]) };
+        assert_eq!(scan_outcome(&[walked], true), ScanOutcome::Stopped);
+        assert_eq!(scan_outcome(&[], true), ScanOutcome::Stopped);
+        assert_eq!(scan_outcome(&[result(500, 200, &[])], true), ScanOutcome::Filled);
         assert!(empty_scan_note(1).contains("1 audio file,"));
         assert!(empty_scan_note(0).contains("No music"));
     }

@@ -1,5 +1,5 @@
 //! Track selection: resolving a `Selection` to ids and the bulk actions (play, queue,
-//! love, add to playlist / set, analyse, delete).
+//! love, add to playlist / set, analyse, remove from library, delete from disk).
 use bc_types::library::*;
 use bc_types::analysis::{ScanRequest, ScanResponse, ScanScope};
 use bc_types::player::PlayerCommand;
@@ -71,12 +71,51 @@ pub async fn delete_tracks(ids: Vec<i64>) -> usize {
     n
 }
 
+/// Out of the library, files kept (`POST /tracks/remove`, 500 ids a call). Returns how many went.
+pub async fn remove_tracks(ids: Vec<i64>) -> usize {
+    let mut n = 0;
+    for chunk in ids.chunks(500) {
+        let req = maint::RemoveTracksRequest { track_ids: chunk.to_vec() };
+        match api::post::<_, maint::RemovedOut>("/tracks/remove", &req).await {
+            Ok(r) => n += r.tracks as usize,
+            Err(e) => {
+                toast_err(&e.message());
+                break;
+            }
+        }
+    }
+    crate::data::invalidate_all();
+    crate::data::invalidate_prefix("home");
+    n
+}
+
+pub fn confirm_remove_tracks(ids: Vec<i64>, on_done: Option<Callback<()>>) {
+    spawn_local(async move {
+        let n = ids.len();
+        let ok = confirm(
+            &format!("Remove {} track{} from the library?", format_count(n as i64), if n == 1 { "" } else { "s" }),
+            "The files stay on disk and future scans skip them. Bring them back from Cleanup \u{203a} Removed.",
+            "Remove",
+            false,
+        )
+        .await;
+        if !ok {
+            return;
+        }
+        let done = remove_tracks(ids).await;
+        toast_ok(&format!("Removed {} track{} from the library", format_count(done as i64), if done == 1 { "" } else { "s" }));
+        if let Some(cb) = on_done {
+            cb.run(());
+        }
+    });
+}
+
 pub fn confirm_delete_tracks(ids: Vec<i64>, on_done: Option<Callback<()>>) {
     spawn_local(async move {
         let n = ids.len();
         let ok = confirm(
-            &format!("Delete {} track{}?", format_count(n as i64), if n == 1 { "" } else { "s" }),
-            "The files are erased from disk. This cannot be undone.",
+            &format!("Delete {} track{} from disk?", format_count(n as i64), if n == 1 { "" } else { "s" }),
+            "The files are erased from disk. This cannot be undone. To keep the files, use Remove from library instead.",
             "Delete",
             true,
         )
@@ -125,7 +164,7 @@ pub fn SelectionBar(selection: RwSignal<Selection>, total: RwSignal<Option<usize
         });
     };
     let with_ids = std::sync::Arc::new(with_ids);
-    let (w1, w2, w3, w4, w5, w6) = (with_ids.clone(), with_ids.clone(), with_ids.clone(), with_ids.clone(), with_ids.clone(), with_ids);
+    let (w1, w2, w3, w4, w5, w6, w7) = (with_ids.clone(), with_ids.clone(), with_ids.clone(), with_ids.clone(), with_ids.clone(), with_ids.clone(), with_ids);
     view! {
         <Show when=move || !selection.with(|s| s.is_empty())>
             <div class="lib-selbar" role="status">
@@ -133,14 +172,15 @@ pub fn SelectionBar(selection: RwSignal<Selection>, total: RwSignal<Option<usize
                 <span>"selected"</span>
                 <span class="spacer"></span>
                 {
-                    let (w1, w2, w3, w4, w5, w6) = (w1.clone(), w2.clone(), w3.clone(), w4.clone(), w5.clone(), w6.clone());
+                    let (w1, w2, w3, w4, w5, w6, w7) = (w1.clone(), w2.clone(), w3.clone(), w4.clone(), w5.clone(), w6.clone(), w7.clone());
                     view! {
                         <Button size=Size::Sm icon="play" disabled=busy on_click=move |_| w1(Box::new(move |ids| { spawn_local(async move { match tracks_of(&ids.into_iter().take(500).collect::<Vec<_>>()).await { Ok(t) => play_items(player, &t, 0, None, false), Err(e) => toast_err(&e.message()) } }); }))>"Play"</Button>
                         <Button size=Size::Sm icon="queue" disabled=busy on_click=move |_| w2(Box::new(move |ids| queue_ids(player, ids.into_iter().take(500).collect(), false)))>"Queue"</Button>
                         <Button size=Size::Sm icon="heart" disabled=busy on_click=move |_| w3(Box::new(move |ids| { spawn_local(async move { match love_ids(ids, true).await { Ok(n) => toast_ok(&format!("Loved {}", format_count(n))), Err(e) => toast_err(&e.message()) } }); }))>"Love"</Button>
                         <Button size=Size::Sm icon="list" disabled=busy on_click=move |_| w4(Box::new(move |ids| host.picker.set(Some(PickerReq { ids: ids_of(ids) }))))><span class="hide-sm">"Add to…"</span></Button>
                         <Button size=Size::Sm icon="activity" disabled=busy on_click=move |_| w5(Box::new(move |ids| { spawn_local(async move { match analyse_ids(ids).await { Ok(m) => toast_ok(&m), Err(e) => toast_err(&e.message()) } }); }))><span class="hide-sm">"Analyse"</span></Button>
-                        <Button size=Size::Sm variant=Variant::Danger icon="trash" disabled=busy on_click=move |_| w6(Box::new(move |ids| confirm_delete_tracks(ids, Some(Callback::new(move |_| selection.set(Selection::None))))))><span class="hide-sm">"Delete"</span></Button>
+                        <Button size=Size::Sm icon="eye-off" title="Remove from library (files stay on disk)" disabled=busy on_click=move |_| w7(Box::new(move |ids| confirm_remove_tracks(ids, Some(Callback::new(move |_| selection.set(Selection::None))))))><span class="hide-sm">"Remove"</span></Button>
+                        <Button size=Size::Sm variant=Variant::Danger icon="trash" title="Delete from disk" disabled=busy on_click=move |_| w6(Box::new(move |ids| confirm_delete_tracks(ids, Some(Callback::new(move |_| selection.set(Selection::None))))))><span class="hide-sm">"Delete"</span></Button>
                     }
                 }
                 <Button size=Size::Sm variant=Variant::Ghost on_click=move |_| selection.set(Selection::None)>"Clear"</Button>

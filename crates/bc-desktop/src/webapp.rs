@@ -5,8 +5,10 @@
 //! switch to install an app, so a headless browser does it once over the DevTools pipe
 //! (`PWA.install`), and the window is then opened with `--app-id`.
 //!
-//! Chromium starts every app with the overlay off; the chevron in the title strip folds it away
-//! and Chromium remembers that per app, so it is one click on first use.
+//! Chromium starts every app with the overlay off (the chevron in the title strip toggles it, and
+//! there is no switch or DevTools call for it), so once after installing, bc turns it on in the
+//! profile's web app database: field 34 of the app's record, `window_controls_overlay_enabled`.
+//! Only once, so folding the strip back down with the chevron sticks.
 //!
 //! The app id is Chromium's own hash, recorded as the one new directory under
 //! `Web Applications/Manifest Resources` after the install. `bc-webapp.json` in the profile keeps
@@ -58,15 +60,48 @@ fn record(profile: &Path, origin: &str, browser: &Path, app_id: Option<&str>) {
     let _ = std::fs::write(profile.join(MARKER), v.to_string());
 }
 
+fn overlay_preset(profile: &Path) -> bool {
+    std::fs::read_to_string(profile.join(MARKER))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("overlay")?.as_bool())
+        == Some(true)
+}
+
+fn record_overlay_preset(profile: &Path) {
+    let path = profile.join(MARKER);
+    let Some(mut v) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) else {
+        return;
+    };
+    v["overlay"] = true.into();
+    let _ = std::fs::write(path, v.to_string());
+}
+
+/// A browser runs on the profile. `SingletonLock` is a symlink to "host-pid" that dangles, so
+/// `exists()` (which follows it) would say no.
+fn in_use(profile: &Path) -> bool {
+    profile.join("SingletonLock").symlink_metadata().is_ok()
+}
+
 /// The app id to open the window with (`--app-id`), installing bc first when it is not yet.
-/// Installs only while no browser runs on the profile.
+/// Installs, and turns the overlay on, only while no browser runs on the profile.
 pub(crate) fn app_id(browser: &Path, profile: &Path, origin: &str) -> Option<String> {
-    if let Some(r) = recorded(profile, origin, browser) {
-        return r;
+    let id = match recorded(profile, origin, browser) {
+        Some(r) => r?,
+        None if in_use(profile) => return None,
+        None => installed(browser, profile, origin)?,
+    };
+    if !overlay_preset(profile) && !in_use(profile) {
+        match enable_overlay(profile, &id) {
+            Ok(()) => tracing::info!(app_id = %id, "turned on the window controls overlay: bc's header is the title bar"),
+            Err(e) => tracing::warn!("could not turn on the window controls overlay ({e}); the title strip's chevron does it"),
+        }
+        record_overlay_preset(profile);
     }
-    if profile.join("SingletonLock").exists() {
-        return None;
-    }
+    Some(id)
+}
+
+fn installed(browser: &Path, profile: &Path, origin: &str) -> Option<String> {
     let before = installed_ids(profile);
     let started = Instant::now();
     match install(browser, profile, origin) {
@@ -83,6 +118,65 @@ pub(crate) fn app_id(browser: &Path, profile: &Path, origin: &str) -> Option<Str
     }
     record(profile, origin, browser, None);
     None
+}
+
+/// `window_controls_overlay_enabled` in Chromium's `WebAppProto`.
+const OVERLAY_FIELD: u64 = 34;
+
+/// Set the app's overlay flag in the web app database (`Sync Data/LevelDB`, key
+/// `web_apps-dt-<id>`, a `WebAppProto`). The browser must not be running.
+fn enable_overlay(profile: &Path, id: &str) -> anyhow::Result<()> {
+    let dir = profile.join("Default").join("Sync Data").join("LevelDB");
+    let opts = rusty_leveldb::Options { create_if_missing: false, ..Default::default() };
+    let mut db = rusty_leveldb::DB::open(&dir, opts)?;
+    let key = format!("web_apps-dt-{id}");
+    let record = db.get(key.as_bytes()).ok_or_else(|| anyhow::anyhow!("no record for {id}"))?;
+    db.put(key.as_bytes(), &with_varint_field(&record, OVERLAY_FIELD, 1)?)?;
+    db.close()?;
+    Ok(())
+}
+
+/// The protobuf message `msg` with every `field` dropped and `field = value` (a varint) appended.
+fn with_varint_field(msg: &[u8], field: u64, value: u64) -> anyhow::Result<Vec<u8>> {
+    fn varint(b: &[u8], p: &mut usize) -> anyhow::Result<u64> {
+        let mut v = 0u64;
+        for shift in (0..64).step_by(7) {
+            let byte = *b.get(*p).ok_or_else(|| anyhow::anyhow!("truncated varint"))?;
+            *p += 1;
+            v |= u64::from(byte & 0x7f) << shift;
+            if byte < 0x80 {
+                return Ok(v);
+            }
+        }
+        anyhow::bail!("overlong varint")
+    }
+    fn put_varint(out: &mut Vec<u8>, mut v: u64) {
+        while v >= 0x80 {
+            out.push(v as u8 | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    }
+    let mut out = Vec::with_capacity(msg.len() + 4);
+    let mut p = 0;
+    while p < msg.len() {
+        let start = p;
+        let tag = varint(msg, &mut p)?;
+        match tag & 7 {
+            0 => drop(varint(msg, &mut p)?),
+            1 => p += 8,
+            2 => p += varint(msg, &mut p)? as usize,
+            5 => p += 4,
+            t => anyhow::bail!("unexpected wire type {t}"),
+        }
+        anyhow::ensure!(p <= msg.len(), "truncated field");
+        if tag >> 3 != field {
+            out.extend_from_slice(&msg[start..p]);
+        }
+    }
+    put_varint(&mut out, field << 3);
+    put_varint(&mut out, value);
+    Ok(out)
 }
 
 /// Install `origin` as a web app in `profile` with a headless browser driven over
@@ -180,6 +274,35 @@ mod tests {
         record(&p, "http://127.0.0.1:8420", chrome, None);
         assert_eq!(recorded(&p, "http://127.0.0.1:8420", chrome), Some(None), "failed with this browser");
         assert_eq!(recorded(&p, "http://127.0.0.1:8420", Path::new("/usr/bin/brave")), None, "another browser may manage");
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn overlay_field_replaces_any_earlier_value() {
+        // 2: "bc", 34: 0, 3: 300
+        let msg = [0x12, 2, b'b', b'c', 0x90, 0x02, 0, 0x18, 0xac, 0x02];
+        assert_eq!(with_varint_field(&msg, 34, 1).unwrap(), [0x12, 2, b'b', b'c', 0x18, 0xac, 0x02, 0x90, 0x02, 1]);
+        assert_eq!(with_varint_field(&[0x12, 2, b'b', b'c'], 34, 1).unwrap(), [0x12, 2, b'b', b'c', 0x90, 0x02, 1]);
+        assert!(with_varint_field(&[0x12, 5, b'b'], 34, 1).is_err(), "truncated");
+    }
+
+    #[test]
+    fn overlay_is_turned_on_in_the_web_app_database() {
+        let p = temp_profile("overlay");
+        let dir = p.join("Default").join("Sync Data").join("LevelDB");
+        let mut db = rusty_leveldb::DB::open(&dir, rusty_leveldb::Options::default()).unwrap();
+        db.put(b"web_apps-dt-abc", &[0x12, 2, b'b', b'c', 0x90, 0x02, 0]).unwrap();
+        db.close().unwrap();
+
+        enable_overlay(&p, "abc").unwrap();
+        let mut db = rusty_leveldb::DB::open(&dir, rusty_leveldb::Options::default()).unwrap();
+        assert_eq!(db.get(b"web_apps-dt-abc").unwrap().as_ref(), [0x12, 2, b'b', b'c', 0x90, 0x02, 1]);
+        assert!(enable_overlay(&p, "missing").is_err());
+
+        record(&p, "http://127.0.0.1:8420", Path::new("/usr/bin/chromium"), Some("abc"));
+        assert!(!overlay_preset(&p));
+        record_overlay_preset(&p);
+        assert!(overlay_preset(&p));
         let _ = std::fs::remove_dir_all(&p);
     }
 }

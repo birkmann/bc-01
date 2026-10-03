@@ -787,6 +787,18 @@ pub(crate) fn best_root<'a>(roots: &'a [RootInfo], path: &Path) -> Option<&'a Ro
         .max_by_key(|r| r.path.components().count())
 }
 
+/// Drop the files removed from the library (see [`bc_maint::excluded`]) from a work list; returns
+/// how many went. Every way into the library calls this before reading a tag.
+pub(crate) fn drop_excluded(ctx: &Ctx, items: &mut Vec<WorkItem>) -> ApiResult<usize> {
+    let excluded = ctx.read(bc_maint::excluded::paths)?;
+    if excluded.is_empty() {
+        return Ok(0);
+    }
+    let before = items.len();
+    items.retain(|it| it.path.to_str().is_none_or(|p| !excluded.contains(p)));
+    Ok(before - items.len())
+}
+
 pub(crate) fn stat_item(path: &Path) -> std::io::Result<WorkItem> {
     use std::os::unix::fs::MetadataExt;
     let m = std::fs::metadata(path)?;
@@ -837,6 +849,7 @@ pub fn ingest_paths(ctx: &Ctx, root_id: i64, paths: &[PathBuf], opts: &IngestOpt
             Err(e) => report.errors.push(format!("{}: {e}", p.display())),
         }
     }
+    drop_excluded(ctx, &mut work)?;
     report.files_seen = work.len() as i64;
     let cancel = AtomicBool::new(false);
     let mut tick = |_: &'static str, _: i64, _: i64| {};

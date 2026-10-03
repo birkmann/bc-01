@@ -170,6 +170,9 @@ pub struct QueueItem {
     /// The Bandcamp release page a streamed track belongs to.
     #[serde(default)]
     pub page_url: Option<String>,
+    /// The streamed track's own Bandcamp page, when known: lets it be downloaded on its own.
+    #[serde(default)]
+    pub track_url: Option<String>,
     /// Playlist row id (a playlist can hold a track twice).
     #[serde(default)]
     pub item_id: Option<i64>,

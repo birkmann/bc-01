@@ -121,6 +121,38 @@ async fn scan_publishes_events() {
     assert!(topics.iter().any(|t| t == "library.changed"), "{topics:?}");
 }
 
+#[tokio::test]
+async fn cancel_stops_a_scan() {
+    let e = env();
+    let m = e.music();
+    write_junk_mp3(&m.join("A/B/01.mp3"), 10);
+    let id = add_root(&e.ctx, &m, "library");
+    let app = crate::router(e.ctx.clone());
+    assert_eq!(call(&app, "POST", "/library/scan/nope/cancel", None).await.0, 404);
+
+    // cancelled before it runs, so the outcome does not hang on timing
+    let handle = e.ctx.jobs.begin("scan", "scan root");
+    let job = handle.id.clone();
+    let (st, j) = call(&app, "POST", &format!("/library/scan/{job}/cancel"), None).await;
+    assert_eq!((st.as_u16(), j["job_id"].as_str()), (202, Some(job.as_str())));
+    let mut rx = e.ctx.bus.subscribe();
+    let ctx = e.ctx.clone();
+    tokio::task::spawn_blocking(move || crate::routes::run_scan_task(ctx, handle, vec![id])).await.unwrap();
+
+    let (_, s) = call(&app, "GET", &format!("/library/scan/{job}"), None).await;
+    assert_eq!(s["state"], "cancelled", "{s}");
+    assert_eq!(scalar(&e.ctx, "SELECT COUNT(*) FROM tracks"), 0);
+    let done = loop {
+        let ev = rx.recv().await.unwrap();
+        if ev.topic == "library.scan.done" {
+            break ev;
+        }
+    };
+    assert_eq!(done.payload["cancelled"], true, "{:?}", done.payload);
+    // stopping a finished scan is a no-op
+    assert_eq!(call(&app, "POST", &format!("/library/scan/{job}/cancel"), None).await.0, 202);
+}
+
 #[test]
 fn watcher_ingests_new_files() {
     use crate::watcher::{WatchConfig, Watcher};
@@ -153,4 +185,46 @@ fn watcher_ingests_new_files() {
     }
     assert!(gone, "watcher should mark the removed file missing");
     w.stop();
+}
+
+#[tokio::test]
+async fn browse_lists_folders_for_the_picker() {
+    let e = env();
+    let m = e.music();
+    std::fs::create_dir_all(m.join("beta")).unwrap();
+    std::fs::create_dir_all(m.join("Alpha/inner")).unwrap();
+    std::fs::create_dir_all(m.join(".hidden")).unwrap();
+    write_junk_mp3(&m.join("loose.mp3"), 10);
+    std::fs::write(m.join("notes.txt"), "x").unwrap();
+    crate::roots::ensure_roots(&e.ctx).unwrap();
+    let app = crate::router(e.ctx.clone());
+
+    let q = |p: &std::path::Path| enc(&p.to_string_lossy());
+    let (st, b) = call(&app, "GET", &format!("/library/browse?path={}", q(&m)), None).await;
+    assert_eq!(st, 200, "{b}");
+    let names: Vec<&str> = b["dirs"].as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Alpha", "beta"], "sorted, dot folders left out, files never listed");
+    assert_eq!(b["audio_files"], 1);
+    assert_eq!(b["is_root"], true, "the configured music folder is a root");
+    let real = std::fs::canonicalize(&m).unwrap();
+    assert_eq!(b["path"], real.to_string_lossy().as_ref());
+    assert_eq!(b["parent"], real.parent().unwrap().to_string_lossy().as_ref());
+    assert!(b["places"].as_array().unwrap().iter().any(|p| p["kind"] == "root" && p["path"] == "/"));
+
+    let (_, b) = call(&app, "GET", &format!("/library/browse?hidden=true&path={}", q(&m)), None).await;
+    assert_eq!(b["dirs"].as_array().unwrap().len(), 3);
+
+    let (_, b) = call(&app, "GET", &format!("/library/browse?path={}", q(&m.join("Alpha"))), None).await;
+    assert_eq!((b["dirs"][0]["name"].as_str(), b["audio_files"].as_i64(), b["is_root"].as_bool()), (Some("inner"), Some(0), Some(false)));
+
+    let (st, _) = call(&app, "GET", &format!("/library/browse?path={}", q(&m.join("nope"))), None).await;
+    assert_eq!(st, 404);
+    let (st, _) = call(&app, "GET", &format!("/library/browse?path={}", q(&m.join("notes.txt"))), None).await;
+    assert_eq!(st, 400);
+}
+
+fn enc(s: &str) -> String {
+    s.bytes()
+        .map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect()
 }

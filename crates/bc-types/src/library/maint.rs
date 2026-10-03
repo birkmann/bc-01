@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::ReleaseOut;
-use crate::ReleaseId;
+use crate::{ReleaseId, TrackId};
 
 // --- delete -------------------------------------------------------------------------
 
@@ -33,6 +33,51 @@ pub struct DeleteReleasesResult {
 pub struct DeletedOut {
     pub tracks: i64,
     pub files: i64,
+}
+
+// --- remove from library (files stay on disk) -----------------------------------------
+
+/// `POST /tracks/remove`: drop tracks from the library and keep their files; the paths are
+/// excluded so the next scan does not bring them back.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RemoveTracksRequest {
+    #[serde(default)]
+    pub track_ids: Vec<TrackId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RemovedOut {
+    pub tracks: i64,
+    /// Releases that lost their last track and went with it.
+    pub releases: i64,
+    /// File paths now excluded from scans.
+    pub excluded: i64,
+}
+
+/// One row of `GET /library/excluded`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ExcludedOut {
+    pub path: String,
+    pub artist_name: String,
+    pub title: String,
+    pub added_at: Option<String>,
+}
+
+/// `POST /library/excluded/restore`: let these paths back in and ingest the ones still on disk.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RestoreExcludedRequest {
+    #[serde(default)]
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RestoredOut {
+    /// Exclusions lifted.
+    pub restored: i64,
+    /// Tracks back in the library (a path that no longer exists is lifted but adds nothing).
+    pub tracks_added: i64,
+    #[serde(default)]
+    pub errors: Vec<String>,
 }
 
 // --- completeness / fill ------------------------------------------------------------

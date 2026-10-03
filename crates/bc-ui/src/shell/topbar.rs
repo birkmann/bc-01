@@ -123,7 +123,7 @@ pub fn TopBar() -> impl IntoView {
     view! {
         <header class=move || if app.nav_collapsed.get() { "topbar rail" } else { "topbar" }>
             <Button variant=Variant::Ghost icon="menu" title="Open navigation" class="only-mobile" on_click=move |_| app.nav_open.set(true) />
-            <div class="hb-brand"><BrandLockup /></div>
+            <div class="hb-brand"><BrandLockup size=22 /></div>
             <span class="hb-div"></span>
             <div class="hb-hist">
                 <HistoryButton dir=Dir::Back />

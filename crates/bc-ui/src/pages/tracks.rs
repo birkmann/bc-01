@@ -27,7 +27,7 @@ mod bulk;
 mod loved;
 mod miss;
 
-use bulk::{SelectionBar, analyse_ids, confirm_delete_tracks, love_ids, queue_ids, selection_ids};
+use bulk::{SelectionBar, analyse_ids, confirm_delete_tracks, confirm_remove_tracks, love_ids, queue_ids, selection_ids};
 use miss::BandcampSearchShelf;
 
 fn sort_of(key: &str) -> Option<TrackSort> {
@@ -123,7 +123,8 @@ fn track_menu(t: TrackOut, player: crate::player::PlayerCtx, nav: Callback<Strin
         v.push(MenuItem::new(format!("Tracks tagged {tag}")).icon("tag").on(move || nav.run(href.clone())).into());
     }
     v.push(MenuEntry::Sep);
-    v.push(MenuItem::new("Delete track…").icon("trash").danger().on(move || confirm_delete_tracks(vec![id], None)).into());
+    v.push(MenuItem::new("Remove from library…").icon("eye-off").on(move || confirm_remove_tracks(vec![id], None)).into());
+    v.push(MenuItem::new("Delete from disk…").icon("trash").danger().on(move || confirm_delete_tracks(vec![id], None)).into());
     v
 }
 

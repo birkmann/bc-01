@@ -60,10 +60,21 @@ pub(crate) fn profile_dir(name: &str) -> PathBuf {
     base.join("bc-rust").join(name)
 }
 
-/// Turn off the browser's own chrome for this private profile: translate offers (the UI is
-/// English, the user's browser language may not be), password prompts, the desktop-themed frame. Only rewritten when the
-/// browser is not running on the profile (Chrome rewrites Preferences on exit).
+/// Turn off the browser's own chrome for this private profile: the first-run dialog (default
+/// browser, usage statistics), default-browser nags, translate offers (the UI is English, the
+/// user's browser language may not be), password prompts, the desktop-themed frame.
+///
+/// `--no-first-run` alone is not enough: Chromium then never writes its `First Run` sentinel, so
+/// any launch without bc's flags (the `.desktop` entry Chromium writes for the installed web app,
+/// which a dock or launcher may start) shows the first-run dialog. The sentinel makes every launch
+/// a later run. Preferences are only rewritten when the browser is not running on the profile
+/// (Chrome rewrites them on exit).
 pub(crate) fn quiet_profile(profile: &std::path::Path) {
+    let sentinel = profile.join("First Run");
+    if !sentinel.exists() {
+        let _ = std::fs::create_dir_all(profile);
+        let _ = std::fs::write(&sentinel, "");
+    }
     if profile.join("SingletonLock").exists() {
         return;
     }
@@ -78,6 +89,7 @@ pub(crate) fn quiet_profile(profile: &std::path::Path) {
     let browser = obj.entry("browser").or_insert_with(|| serde_json::json!({}));
     if let Some(b) = browser.as_object_mut() {
         b.insert("custom_chrome_frame".into(), serde_json::json!(true));
+        b.insert("check_default_browser".into(), serde_json::json!(false));
     }
     let ext = obj.entry("extensions").or_insert_with(|| serde_json::json!({}));
     if let Some(e) = ext.as_object_mut() {
@@ -359,6 +371,18 @@ mod tests {
         assert_eq!(Browser::from_path("/usr/bin/firefox-developer-edition".into()), Browser::Firefox("/usr/bin/firefox-developer-edition".into()));
         assert_eq!(Browser::from_path("/usr/bin/chromium".into()), Browser::Chromium("/usr/bin/chromium".into()));
         assert_eq!(Browser::from_path("/usr/bin/brave".into()), Browser::Chromium("/usr/bin/brave".into()));
+    }
+
+    #[test]
+    fn quiet_profile_is_never_a_first_run() {
+        let dir = std::env::temp_dir().join(format!("bc-desktop-quiet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        quiet_profile(&dir);
+        assert!(dir.join("First Run").is_file(), "sentinel written on a fresh profile");
+        let prefs: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("Default/Preferences")).unwrap()).unwrap();
+        assert_eq!(prefs["browser"]["check_default_browser"], serde_json::json!(false));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

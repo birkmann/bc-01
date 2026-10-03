@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use bc_db::rusqlite::params;
@@ -31,7 +31,10 @@ pub struct WalkFailure {
     pub error: String,
 }
 
-fn walk_dir(dir: &Path, fails: &parking_lot::Mutex<Vec<WalkFailure>>) -> Vec<WorkItem> {
+fn walk_dir(dir: &Path, fails: &parking_lot::Mutex<Vec<WalkFailure>>, cancel: &AtomicBool) -> Vec<WorkItem> {
+    if cancel.load(Ordering::Relaxed) {
+        return Vec::new();
+    }
     let rd = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(e) => {
@@ -69,7 +72,7 @@ fn walk_dir(dir: &Path, fails: &parking_lot::Mutex<Vec<WalkFailure>>) -> Vec<Wor
             });
         }
     }
-    let nested: Vec<Vec<WorkItem>> = subdirs.par_iter().map(|d| walk_dir(d, fails)).collect();
+    let nested: Vec<Vec<WorkItem>> = subdirs.par_iter().map(|d| walk_dir(d, fails, cancel)).collect();
     for n in nested {
         files.extend(n);
     }
@@ -79,8 +82,13 @@ fn walk_dir(dir: &Path, fails: &parking_lot::Mutex<Vec<WalkFailure>>) -> Vec<Wor
 /// Stage a: every audio file under `root` (hidden entries skipped, symlinks not followed),
 /// plus the directories that could not be read.
 pub fn walk_audio(root: &Path) -> (Vec<WorkItem>, Vec<WalkFailure>) {
+    walk_audio_until(root, &AtomicBool::new(false))
+}
+
+/// [`walk_audio`] that stops descending once `cancel` is set; the list is then partial.
+pub fn walk_audio_until(root: &Path, cancel: &AtomicBool) -> (Vec<WorkItem>, Vec<WalkFailure>) {
     let fails = parking_lot::Mutex::new(Vec::new());
-    let items = walk_dir(root, &fails);
+    let items = walk_dir(root, &fails, cancel);
     (items, fails.into_inner())
 }
 
@@ -133,7 +141,8 @@ pub fn scan_root(ctx: &Ctx, root_id: i64, hooks: ScanHooks<'_>) -> ApiResult<Sca
     // The root itself must be readable (an unmounted drive leaves an empty mountpoint, which
     // is caught by the zero-files guard below).
     tick("walk", 0, 0);
-    let (items, failures) = walk_audio(&root.path);
+    let (mut items, failures) = walk_audio_until(&root.path, cancel);
+    crate::ingest::drop_excluded(ctx, &mut items)?;
     result.files_seen = items.len() as i64;
     for f in &failures {
         result.errors.push(format!("cannot read {}: {}", f.dir.display(), f.error));
@@ -192,7 +201,9 @@ pub fn scan_root(ctx: &Ctx, root_id: i64, hooks: ScanHooks<'_>) -> ApiResult<Sca
     let out = run_pipeline(ctx, &root, work, &opts, cancel, &mut tick)?;
     result.tracks_added = out.tally.tracks_added;
     result.errors.extend(out.tally.errors.iter().cloned());
-    let cancelled = out.cancelled;
+    // A walk cut short leaves an empty or all-unchanged work list, which the pipeline does not
+    // report as cancelled: the flag itself has the last word.
+    let cancelled = out.cancelled || cancel.load(Ordering::Relaxed);
 
     // Mark vanished files. Never delete: an unmounted drive must not destroy playlists,
     // ratings or play history.
@@ -225,13 +236,16 @@ pub fn scan_root(ctx: &Ctx, root_id: i64, hooks: ScanHooks<'_>) -> ApiResult<Sca
         result.files_missing = n;
     }
 
-    let ms = started.elapsed().as_millis() as i64;
-    let now = now_db();
-    ctx.db
-        .write_with::<_, ApiError>(move |tx| {
-            tx.execute("UPDATE library_roots SET last_scan_at = ?1, last_scan_ms = ?2 WHERE id = ?3", params![now, ms, rid])?;
-            Ok(())
-        })?;
+    // A stopped scan is not a scan of the root: it keeps its last completed one.
+    if !cancelled {
+        let ms = started.elapsed().as_millis() as i64;
+        let now = now_db();
+        ctx.db
+            .write_with::<_, ApiError>(move |tx| {
+                tx.execute("UPDATE library_roots SET last_scan_at = ?1, last_scan_ms = ?2 WHERE id = ?3", params![now, ms, rid])?;
+                Ok(())
+            })?;
+    }
     result.duration_ms = started.elapsed().as_millis() as i64;
     tick("done", result.files_seen, result.files_seen);
 
@@ -277,6 +291,7 @@ pub fn scan_paths(ctx: &Ctx, root_id: i64, changed: &[PathBuf]) -> ApiResult<Sca
     }
     let mut seen = HashSet::new();
     candidates.retain(|c| seen.insert(c.path.clone()));
+    crate::ingest::drop_excluded(ctx, &mut candidates)?;
     result.files_seen = candidates.len() as i64;
 
     // Stat-compare the candidates against the DB.

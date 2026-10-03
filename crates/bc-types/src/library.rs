@@ -708,6 +708,39 @@ fn d_kind_library() -> String {
     "library".into()
 }
 
+/// `GET /library/browse?path=&hidden=`: one folder on the machine running bc, for picking a
+/// root. Folders only (and how many audio files sit directly in this one), never file names.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct BrowseOut {
+    /// Canonical path of the folder listed.
+    pub path: String,
+    /// `None` at the filesystem root.
+    pub parent: Option<String>,
+    /// Subfolders, sorted by name (case-insensitive); dot folders only with `hidden=true`.
+    pub dirs: Vec<BrowseDir>,
+    /// Audio files directly in `path` (not in its subfolders).
+    pub audio_files: u32,
+    /// `path` is already a library root.
+    #[serde(default)]
+    pub is_root: bool,
+    /// Starting points: home, the music folder, mounted drives, the filesystem root.
+    pub places: Vec<BrowsePlace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrowseDir {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrowsePlace {
+    pub label: String,
+    pub path: String,
+    /// `home` | `music` | `drive` | `root`
+    pub kind: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RootPatch {
     pub enabled: Option<bool>,
@@ -782,7 +815,7 @@ pub struct ScanResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ScanStatus {
     pub job_id: String,
-    /// `running` | `done` | `failed`
+    /// `running` | `done` | `failed` | `cancelled` (stopped early; `results` holds what got done)
     pub state: String,
     pub root_id: Option<i64>,
     pub phase: String,

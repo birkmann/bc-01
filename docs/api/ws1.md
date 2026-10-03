@@ -4,7 +4,8 @@ Paths are **without** the `/api` prefix (`bc-server` nests the router under `/ap
 only; split over `library.rs`, `library/{maint,metadata,playlists,scan}.rs`). DJ-set DTOs are WS3's `bc_types::sets`.
 Errors are RFC 9457 `problem+json` (`bc_types::Problem`): 400/404/409, 503 + `Retry-After` when the DB is busy.
 Timestamps are ISO-8601 UTC strings (`2026-07-28T07:06:39.490752Z`). **No filesystem path is ever returned to a client**
-except `RootOut.path`; the only request bodies that carry a path are `POST /library/roots` and the move target.
+except `RootOut.path` and the folder picker's `BrowseOut` (folders only, never file names); the only request bodies that carry a path
+are `POST /library/roots` and the move target.
 
 ```rust
 // bc-server wiring (WS5)
@@ -40,6 +41,7 @@ let lib = lib.with_jobs(jobs_host)       // bc_libcore::JobHost (e.g. an adapter
 | POST | `/tracks/love` | `SetLoved { track_ids, loved }` | `ChangedOut { changed }` (assign, not toggle) |
 | PUT | `/tracks/{id}/rating` | `SetRating { rating: 0..5 \| null }` | `TrackOut` |
 | DELETE | `/tracks/{id}` | | `DeletedOut` (removes file + row) |
+| POST | `/tracks/remove` | `RemoveTracksRequest` | `RemovedOut`; rows only, files stay on disk and their paths go on the excluded list so scans skip them (an emptied release goes too) |
 
 `TrackSort`: added, title, artist, album, duration, bpm, play_count, last_played, year, random, relevance, key, energy, rating.
 `order` = asc\|desc (default desc; `album` always plays disc/track ascending inside an album).
@@ -85,9 +87,13 @@ let lib = lib.with_jobs(jobs_host)       // bc_libcore::JobHost (e.g. an adapter
 | GET/PUT | `/library/snippets` | `SnippetSettingIn` | `SnippetSettingOut` |
 | GET | `/library/roots` | | `Vec<RootOut>` |
 | POST | `/library/roots` | `AddRootRequest` (path!) | `RootOut` |
+| GET | `/library/browse?path=&hidden=` | | `BrowseOut`: the subfolders of `path` (`~` expands; empty = the music folder, `XDG_MUSIC_DIR` or `~/Music`, else home), its audio file count, whether it is a library root, and places (home, music folder, drives under `/run/media/$USER`, `/media`, `/mnt`, `/Volumes`, `/`); 404 when missing, 400 for a file or an unreadable folder |
 | PATCH | `/library/roots/{id}` | `RootPatch` | `RootOut` |
 | DELETE | `/library/roots/{id}` | | 204 |
 | POST | `/library/scan?root_id=` | | `202 Accepted` -> `library.scan.*` events, `GET /library/scan/{job_id}` -> `ScanStatus` |
+| POST | `/library/scan/{job_id}/cancel` | | `202 Accepted`; stops the scan between files, keeps what was written, marks nothing missing; `library.scan.done` carries `"cancelled": true` and `ScanStatus.state` becomes `cancelled` |
+| GET | `/library/excluded` | | `Vec<ExcludedOut>` (files removed from the library, newest first) |
+| POST | `/library/excluded/restore` | `RestoreExcludedRequest` | `RestoredOut`; lifts the exclusions and ingests the files still on disk |
 | POST | `/library/roots/{id}/move/plan` | `MoveRequest` (path!) | `MovePlanOut` |
 | POST | `/library/roots/{id}/move` | `MoveRequest` | `202 Accepted` -> `library.move.progress`; result `MoveResult` |
 | POST | `/library/import` | `ImportRequest { from?, force, skip_repairs }` (`from` = legacy db/dir, read-only; a third path-accepting route) | `202 Accepted`; only when the library is empty or `force=true` (409 otherwise); progress on `library.import.progress`, report in the task result |

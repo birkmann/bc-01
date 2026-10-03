@@ -284,6 +284,7 @@ impl bc_engine::ports::BandcampPort for BcPlayerPort {
                     stream_url: Some(stream),
                     origin: bc_types::player::ItemOrigin::Bandcamp,
                     page_url: Some(rel.url.clone()),
+                    track_url: t.url.clone().filter(|u| !u.is_empty()),
                     ..Default::default()
                 })
             })

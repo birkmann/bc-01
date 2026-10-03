@@ -14,6 +14,7 @@ use crate::api;
 use crate::data::{QuerySpec, use_query, use_topic};
 use crate::ds::{Badge, Button, Dialog, Icon, Meter, Select, SelectOption, Size, Skeleton, Switch, Tone, Variant, toast_err, toast_ok};
 use crate::logic::format::{format_bytes, format_count, format_long_duration};
+use crate::widgets::FolderPicker;
 
 #[component]
 pub fn LibrarySection() -> impl IntoView {
@@ -23,6 +24,7 @@ pub fn LibrarySection() -> impl IntoView {
     let scanning = RwSignal::new(false);
     let move_root = RwSignal::new(None::<RootOut>);
     let move_open = RwSignal::new(false);
+    let stopping = RwSignal::new(false);
 
     use_topic::<ScanProgress>("library.scan.progress", move |p| {
         progress.update(|m| {
@@ -31,6 +33,7 @@ pub fn LibrarySection() -> impl IntoView {
     });
     use_topic::<serde_json::Value>("library.scan.done", move |v| {
         scanning.set(false);
+        stopping.set(false);
         progress.set(BTreeMap::new());
         if let Some(id) = v.get("job_id").and_then(|j| j.as_str()).map(str::to_string) {
             spawn_local(async move {
@@ -52,6 +55,19 @@ pub fn LibrarySection() -> impl IntoView {
         spawn_local(async move {
             if let Err(e) = api::post::<_, Accepted>(&url, &serde_json::json!({})).await {
                 scanning.set(false);
+                toast_err(&e.message());
+            }
+        });
+    };
+
+    // the running scan, whoever started it
+    let job = Memo::new(move |_| progress.with(|m| m.values().next().map(|p| p.job_id.clone())));
+    let stop_scan = move |_| {
+        let Some(id) = job.get_untracked() else { return };
+        stopping.set(true);
+        spawn_local(async move {
+            if let Err(e) = api::post::<_, Accepted>(&format!("/library/scan/{id}/cancel"), &serde_json::json!({})).await {
+                stopping.set(false);
                 toast_err(&e.message());
             }
         });
@@ -96,6 +112,10 @@ pub fn LibrarySection() -> impl IntoView {
         <SysCard title="Library roots" icon="folder"
             hint="Folders Crate indexes. Files are read in place and never modified by a scan."
             actions=crate::ds::children(move || view! {
+                <Show when=move || job.get().is_some()>
+                    <Button size=Size::Sm icon="x" busy=stopping title="Stop the scan; tracks already added stay in the library"
+                        on_click=stop_scan>"Stop"</Button>
+                </Show>
                 <Button size=Size::Sm icon="refresh" busy=scanning on_click=move |_| start_scan(None)>"Scan all"</Button>
             })>
             <Show when=move || stats.data.get().map(|s| s.roots.is_empty()).unwrap_or(false)>
@@ -210,15 +230,18 @@ fn AddRoot(on_added: Callback<()>) -> impl IntoView {
         });
     };
     let add2 = add.clone();
+    let picking = RwSignal::new(false);
     view! {
         <div class="add-root">
             <input class="input mono grow" placeholder="/home/you/Music" spellcheck="false" aria-label="New root path"
                 prop:value=move || path.get() on:input=move |ev| path.set(event_target_value(&ev))
                 on:keydown=move |ev| if ev.key() == "Enter" { add2() } />
             <div style="width:140px"><Select options=vec![SelectOption::new("library", "Library"), SelectOption::new("downloads", "Downloads")] value=kind aria_label="Root kind" /></div>
+            <Button icon="folder" title="Pick a folder on the machine running bc" on_click=move |_| picking.set(true)>"Browse"</Button>
             <Button variant=Variant::Primary icon="plus" busy=busy disabled=Signal::derive(move || path.get().trim().is_empty()) on_click=move |_| add()>"Add"</Button>
         </div>
         <Notice text=error />
+        <FolderPicker open=picking start=Signal::derive(move || path.get()) on_pick=Callback::new(move |p| path.set(p)) />
     }
 }
 

@@ -15,10 +15,10 @@ pub fn BrandMark(#[prop(default = 20)] size: u32) -> impl IntoView {
 
 /// Mark + "bc", linking home.
 #[component]
-pub fn BrandLockup(#[prop(optional, into)] class: Option<String>) -> impl IntoView {
+pub fn BrandLockup(#[prop(optional, into)] class: Option<String>, #[prop(default = 20)] size: u32) -> impl IntoView {
     view! {
         <a href="/" class=format!("brand {}", class.unwrap_or_default()) title="bc - home">
-            <BrandMark size=20 /><span class="brand-word">"bc"</span>
+            <BrandMark size=size /><span class="brand-word">"bc"</span>
         </a>
     }
 }

@@ -365,6 +365,7 @@ pub fn stream_item(r: &ExploreReleaseOut, t: &ExploreTrackOut, index: usize) -> 
         stream_url: t.stream_url.clone(),
         origin: ItemOrigin::Bandcamp,
         page_url: Some(r.url.clone()),
+        track_url: t.url.clone().filter(|u| !u.is_empty()),
         ..Default::default()
     }
 }
@@ -572,6 +573,15 @@ mod tests {
         assert_eq!(items[0].origin, ItemOrigin::Bandcamp);
         assert_eq!(items[0].page_url.as_deref(), Some("https://a.bandcamp.com/album/x"));
         assert_eq!(items[0].artist.as_deref(), Some("A"));
+        assert_eq!(items[0].track_url, None);
+    }
+
+    #[test]
+    fn stream_items_carry_their_track_page() {
+        let mut t = track("one", Some(1), Some("/s"));
+        t.url = Some("https://a.bandcamp.com/track/one".into());
+        let r = ExploreReleaseOut { url: "https://a.bandcamp.com/album/x".into(), tracks: vec![t], ..Default::default() };
+        assert_eq!(stream_items(&r)[0].track_url.as_deref(), Some("https://a.bandcamp.com/track/one"));
     }
 
     #[test]

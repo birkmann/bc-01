@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use bc_libcore::ApiResult;
+use bc_types::library::maint::{RemoveTracksRequest, RemovedOut};
 use bc_types::library::{DeleteLabelResult, DeleteReleasesRequest, DeleteReleasesResult, DeletedOut};
 
 use super::{MaintState, blocking};
@@ -17,6 +18,12 @@ pub async fn delete_releases(State(s): State<MaintState>, Json(body): Json<Delet
 pub async fn delete_track(State(s): State<MaintState>, Path(id): Path<i64>) -> ApiResult<Json<DeletedOut>> {
     let ctx = s.ctx.clone();
     Ok(Json(blocking(move || delete::delete_track(&ctx, id)).await?))
+}
+
+/// `POST /tracks/remove`: out of the library, files kept and excluded from scans.
+pub async fn remove_tracks(State(s): State<MaintState>, Json(body): Json<RemoveTracksRequest>) -> ApiResult<Json<RemovedOut>> {
+    let ctx = s.ctx.clone();
+    Ok(Json(blocking(move || delete::remove_tracks(&ctx, &body.track_ids)).await?))
 }
 
 pub async fn delete_release(State(s): State<MaintState>, Path(id): Path<i64>) -> ApiResult<Json<DeletedOut>> {

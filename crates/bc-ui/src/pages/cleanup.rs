@@ -1,5 +1,6 @@
 //! Cleanup: albums that are not music you would ever play (sample packs, preview
-//! stubs), single-track strays, and the blacklist. Everything here destroys data, so
+//! stubs), single-track strays, the blacklist, and tracks removed from the library with their
+//! files kept. Everything here destroys data, so
 //! it is its own workspace; deleting can also blacklist, which is the only thing that
 //! makes a deletion stick (the wishlist would otherwise fetch it straight back).
 use std::collections::BTreeSet;
@@ -22,17 +23,19 @@ use crate::widgets::{CardGrid, PageFetcher, PageRes};
 
 mod blacklist;
 mod logic;
+mod removed;
 mod strays;
 
 pub use blacklist::BlacklistPanel;
 use logic::*;
+use removed::RemovedPanel;
 use strays::StraysPanel;
 
 #[component]
 pub fn CleanupPage() -> impl IntoView {
     let query = use_query_map();
     let navigate = use_navigate();
-    let initial = query.get_untracked().get("tab").filter(|t| ["junk", "strays", "blacklist"].contains(&t.as_str())).unwrap_or_else(|| "junk".into());
+    let initial = query.get_untracked().get("tab").filter(|t| ["junk", "strays", "blacklist", "removed"].contains(&t.as_str())).unwrap_or_else(|| "junk".into());
     let tab = RwSignal::new(initial);
     Effect::new(move |prev: Option<String>| {
         let t = tab.get();
@@ -48,6 +51,7 @@ pub fn CleanupPage() -> impl IntoView {
 
     let strays = qh(use_query::<StraysOut>(|| Some(QuerySpec::new("/releases/strays?limit=40", &["release", "strays"]))));
     let bl = qh(use_query::<Page<BlacklistOut>>(|| Some(QuerySpec::new("/blacklist?limit=500", &["blacklist"]))));
+    let removed = qh(use_query::<Vec<ExcludedOut>>(|| Some(QuerySpec::new(removed::QUERY, &["excluded", "track"]))));
     let junk_total = RwSignal::new(None::<usize>);
 
     let tabs = Signal::derive(move || {
@@ -63,13 +67,18 @@ pub fn CleanupPage() -> impl IntoView {
         if let Some(p) = bl.data.get() {
             b = b.count(p.total);
         }
-        vec![junk, st, b]
+        let mut rm = TabDef::new("removed", "Removed");
+        if let Some(v) = removed.data.get() {
+            rm = rm.count(v.len() as i64);
+        }
+        vec![junk, st, b, rm]
     });
     let thresholds: Vec<SelectOption> = THRESHOLDS.iter().map(|t| SelectOption::new(t.to_string(), format!("{t} s"))).collect();
     let subtitle = Signal::derive(move || match (tab.get().as_str(), junk_total.get()) {
         ("junk", Some(n)) => format!("{} album{} look like sample packs or preview stubs", format_count(n as i64), if n == 1 { "" } else { "s" }),
         ("strays", _) => "Single tracks filed as albums of their own".to_string(),
         ("blacklist", _) => "Releases that are never downloaded again".to_string(),
+        ("removed", _) => "Tracks out of the library, files still on disk".to_string(),
         _ => String::new(),
     });
 
@@ -93,6 +102,7 @@ pub fn CleanupPage() -> impl IntoView {
             </Show>
             <Show when=move || tab.get() == "strays"><div class="page-scroll"><div class="sys-page"><StraysPanel /></div></div></Show>
             <Show when=move || tab.get() == "blacklist"><div class="page-scroll"><div class="sys-page"><BlacklistPanel /></div></div></Show>
+            <Show when=move || tab.get() == "removed"><div class="page-scroll"><div class="sys-page"><RemovedPanel /></div></div></Show>
         </div>
     }
 }

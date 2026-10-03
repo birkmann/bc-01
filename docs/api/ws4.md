@@ -54,7 +54,8 @@ preview (cue deck): `preview_start{item,at_s?}`, `preview_stop`
 misc: `mark_loved{track_id,loved}`, `clear_error`
 
 `QueueItem` needs only `track_id` + `title` for library tracks (the session fills in path, analysis and
-mix points by id). Bandcamp items set `origin:"bandcamp"` and `stream_url`/`page_url`.
+mix points by id). Bandcamp items set `origin:"bandcamp"` and `stream_url`/`page_url`, plus `track_url` (the track's own
+page) when known, which lets the player bar download that track alone.
 
 ## HTTP routes (all under `/player`)
 

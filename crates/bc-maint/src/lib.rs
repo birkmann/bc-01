@@ -6,7 +6,8 @@
 //! * [`strays`] -- single tracks filed as releases, and the background merger
 //! * [`relocate`] -- move a library root (also across drives)
 //! * [`tidy`] -- sidecar / empty-dir / artwork sweeps
-//! * [`delete`] -- file-backed deletes confined to registered roots
+//! * [`delete`] -- file-backed deletes confined to registered roots, and removals that keep the files
+//! * [`excluded`] -- paths removed from the library that scans must not import again
 //! * [`matching`], [`dedup`] -- `(artist, title)` release index; URL dedup and the repair passes
 //! * [`loved`] -- loved Bandcamp streams and their conversion to loved library tracks
 //! * [`adopt`] -- the write half of the library scope (adopt / assign releases)
@@ -25,6 +26,7 @@ pub mod cleanup;
 pub mod completeness;
 pub mod dedup;
 pub mod delete;
+pub mod excluded;
 pub mod lookup;
 pub mod loved;
 pub mod matching;

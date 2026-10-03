@@ -311,6 +311,27 @@ async fn deleting_the_last_track_takes_the_release() {
 }
 
 #[tokio::test]
+async fn remove_tracks_keeps_files_and_folder_and_excludes_the_paths() {
+    let env = test_env();
+    let (music, root) = music_root(&env);
+    let a = album_on_disk(&env, root, &music, "Producer", "Kept", 2, &["house"], None);
+    std::fs::write(a.folder.join("cover.jpg"), [0xffu8, 0xd8, 0xff]).unwrap();
+    let app = app(&env, false);
+    let first = q_i64(&env.db, &format!("SELECT MIN(id) FROM tracks WHERE release_id={}", a.release));
+    let last = q_i64(&env.db, &format!("SELECT MAX(id) FROM tracks WHERE release_id={}", a.release));
+    let (st, body) = call(&app, "POST", "/tracks/remove", Some(json!({"track_ids": [first]}))).await;
+    assert_eq!((st, body), (StatusCode::OK, json!({"tracks": 1, "releases": 0, "excluded": 1})));
+    assert_eq!(q_i64(&env.db, "SELECT track_count FROM tags WHERE name_key='house'"), 1);
+    let (st, body) = call(&app, "POST", "/tracks/remove", Some(json!({"track_ids": [last, 999]}))).await;
+    assert_eq!((st, body), (StatusCode::OK, json!({"tracks": 1, "releases": 1, "excluded": 1})));
+    assert_eq!(q_i64(&env.db, "SELECT COUNT(*) FROM excluded_files"), 2);
+    assert_eq!(q_i64(&env.db, &format!("SELECT COUNT(*) FROM releases WHERE id={}", a.release)), 0);
+    assert_eq!(std::fs::read_dir(&a.folder).unwrap().count(), 3, "both audio files and the cover stay on disk");
+    assert_eq!(call(&app, "POST", "/tracks/remove", Some(json!({"track_ids": [first]}))).await.0, 404);
+    assert_eq!(call(&app, "POST", "/tracks/remove", Some(json!({"track_ids": []}))).await.0, 400);
+}
+
+#[tokio::test]
 async fn delete_label_takes_the_catalogue_and_the_inbox_evidence() {
     let env = test_env();
     let (music, root) = music_root(&env);

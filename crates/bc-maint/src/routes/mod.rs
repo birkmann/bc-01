@@ -9,6 +9,7 @@
 //! | `POST /releases/{id}/fill`, `POST /releases/fill` | re-download to fill missing tracks |
 //! | `GET /releases/strays`, `POST\|GET\|DELETE /releases/strays/merge` | stray tracks and the merger |
 //! | `POST /releases/delete`, `DELETE /tracks/{id}`, `DELETE /releases/{id}`, `DELETE /labels/{id}` | deletes (files confined to registered roots) |
+//! | `POST /tracks/remove` | out of the library, files kept (and excluded from scans) |
 //! | `POST /library/roots/{id}/move/plan`, `POST /library/roots/{id}/move` | relocate a root (the move is a tracked task, `202 Accepted`) |
 //! | `GET\|PUT /library/scope`, `GET\|PUT /library/snippets` | library scope and snippet settings |
 //!
@@ -74,6 +75,7 @@ pub fn router_with(ctx: Ctx, lookup: Option<Arc<dyn BandcampLookup>>, retag: Arc
         .route("/releases/strays/merge", post(strays_routes::merge).get(strays_routes::status).delete(strays_routes::stop))
         .route("/releases/delete", post(delete_routes::delete_releases))
         .route("/tracks/{id}", delete(delete_routes::delete_track))
+        .route("/tracks/remove", post(delete_routes::remove_tracks))
         .route("/releases/{id}", delete(delete_routes::delete_release))
         .route("/labels/{id}", delete(delete_routes::delete_label))
         .route("/library/roots/{id}/move/plan", post(move_root::plan))

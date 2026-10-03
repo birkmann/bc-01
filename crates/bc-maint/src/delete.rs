@@ -11,10 +11,11 @@ use std::path::PathBuf;
 
 use bc_db::rusqlite::{Connection, OptionalExtension};
 use bc_libcore::{ApiError, ApiResult, Ctx};
+use bc_types::library::maint::RemovedOut;
 use bc_types::library::{DeleteLabelResult, DeleteReleasesResult, DeletedOut, LibraryChanged, TOPIC_LIBRARY_CHANGED};
 
 use crate::util::{canon, ids_json, root_paths, under_a_root};
-use crate::{blacklist, tidy};
+use crate::{blacklist, excluded, tidy};
 
 /// What one purge removed.
 #[derive(Debug, Clone, Default)]
@@ -178,8 +179,8 @@ pub fn delete_releases(ctx: &Ctx, ids: &[i64], blacklist_them: bool, reason: Opt
     Ok(result)
 }
 
-/// `DELETE /tracks/{id}`: the audio file goes as well as the row (removing only the row would be
-/// pointless: the next scan re-imports the file). Deleting a release's last track takes the
+/// `DELETE /tracks/{id}`: the audio file goes as well as the row (to keep the file, use
+/// [`remove_tracks`], which excludes the path so the next scan does not re-import it). Deleting a release's last track takes the
 /// release with it, the way `purge_release` would: an empty album would otherwise linger on Home
 /// and in Albums with every track "missing".
 pub fn delete_track(ctx: &Ctx, track_id: i64) -> ApiResult<DeletedOut> {
@@ -212,6 +213,44 @@ pub fn delete_track(ctx: &Ctx, track_id: i64) -> ApiResult<DeletedOut> {
     ctx.read(|c| tidy::prune_empty_dirs(c, &touched))?;
     announce(ctx, &[track_id], &gone);
     Ok(DeletedOut { tracks: 1, files })
+}
+
+/// `POST /tracks/remove`: take tracks out of the library and leave their files where they are.
+/// The paths are excluded first (see [`excluded`]) so the next scan does not import them again.
+/// Only rows go: nothing on disk is touched, not even sidecars or emptied folders. A release
+/// that loses its last track goes with it, as in [`delete_track`]. One transaction for the lot.
+pub fn remove_tracks(ctx: &Ctx, track_ids: &[i64]) -> ApiResult<RemovedOut> {
+    if track_ids.is_empty() {
+        return Err(ApiError::bad("no tracks given"));
+    }
+    let wanted = ids_json(track_ids);
+    let (ids, emptied, excluded) = ctx.write(move |t| {
+        let (ids, releases): (Vec<i64>, Vec<i64>) = {
+            let mut st = t.prepare("SELECT id, release_id FROM tracks WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id")?;
+            let rows: Vec<(i64, Option<i64>)> = st.query_map([&wanted], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+            let releases = crate::util::dedup_sorted(rows.iter().filter_map(|r| r.1));
+            (rows.into_iter().map(|r| r.0).collect(), releases)
+        };
+        if ids.is_empty() {
+            return Err(ApiError::not_found("none of those tracks exist"));
+        }
+        let excluded = excluded::add_for_tracks(t, &ids)?;
+        release_tag_counts(t, &ids)?;
+        bc_db::fts::remove_tracks(t, &ids).map_err(ApiError::from)?;
+        t.execute("DELETE FROM tracks WHERE id IN (SELECT value FROM json_each(?1))", [ids_json(&ids)])?;
+        let emptied: Vec<i64> = {
+            let mut st = t.prepare(
+                "SELECT value FROM json_each(?1) WHERE NOT EXISTS (SELECT 1 FROM tracks WHERE release_id = value)",
+            )?;
+            st.query_map([ids_json(&releases)], |r| r.get(0))?.collect::<Result<_, _>>()?
+        };
+        tidy::delete_artwork_rows(t, &emptied)?;
+        t.execute("DELETE FROM releases WHERE id IN (SELECT value FROM json_each(?1))", [ids_json(&emptied)])?;
+        Ok((ids, emptied, excluded))
+    })?;
+    tidy::delete_artwork(&ctx.config.art_dir(), &emptied);
+    announce(ctx, &ids, &emptied);
+    Ok(RemovedOut { tracks: ids.len() as i64, releases: emptied.len() as i64, excluded })
 }
 
 /// `DELETE /releases/{id}`: every track, its files and the emptied folders.

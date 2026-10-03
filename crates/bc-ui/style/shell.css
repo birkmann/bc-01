@@ -76,8 +76,10 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
 .topbar .search { flex: 1; max-width: 560px; margin: 0 auto; }
 .topbar .only-mobile { display: inline-flex; }
 .topbar .btn-ghost:hover:not(:disabled) { background: var(--color-surface-3); }
-.hb-brand { flex: none; display: flex; align-items: center; width: calc(var(--sidebar-w) - 13px); padding-left: 14px; transition: width var(--dur-base) var(--ease), padding var(--dur-base) var(--ease); }
-.topbar.rail .hb-brand { width: calc(var(--rail-w) - 13px); padding-left: 18px; }
+.hb-brand { flex: none; display: flex; align-items: center; width: calc(var(--sidebar-w) - 13px); padding-left: 13px; transition: width var(--dur-base) var(--ease), padding var(--dur-base) var(--ease); }
+.topbar.rail .hb-brand { width: calc(var(--rail-w) - 13px); padding-left: 17px; }
+/* Sized like rille's title bar lockup; the mark stays centred over the nav icons below. */
+.topbar .brand-word { font-size: 20px; }
 .topbar.rail .brand-word { display: none; }
 .hb-div { flex: none; width: 1px; height: 18px; background: var(--color-line); }
 .hb-hist { flex: none; display: flex; align-items: center; gap: 2px; }

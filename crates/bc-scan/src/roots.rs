@@ -65,11 +65,14 @@ pub fn add_root(ctx: &Ctx, path: &str, kind: &str) -> ApiResult<RootOut> {
     ctx.read(|c| get_root(c, id))?.ok_or_else(|| ApiError::internal("root vanished"))
 }
 
-fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home).join(rest);
+pub(crate) fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        if path == "~" {
+            return PathBuf::from(home);
+        }
+        if let Some(rest) = path.strip_prefix("~/") {
+            return PathBuf::from(home).join(rest);
+        }
     }
     PathBuf::from(path)
 }
