@@ -1,6 +1,6 @@
 [package]
 name = "bc-desktop"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "bc desktop app: in-process bc-server + audio engine, UI in a browser app window (Linux) or a native web view window (macOS), single instance."
 

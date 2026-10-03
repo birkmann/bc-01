@@ -1,6 +1,6 @@
 [package]
 name = "bc-waveform"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "Waveform data (.bcw2 format, streaming builder, mip pyramid, LRU store) and the WebGL2/Canvas2D renderer."
 
