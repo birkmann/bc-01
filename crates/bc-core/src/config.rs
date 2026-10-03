@@ -25,6 +25,15 @@ pub struct Config {
     pub legacy_db: Option<PathBuf>,
 }
 
+/// bandcamp-dl's own default layout: `<artist>/<album>/<NN> - <title>`.
+pub const DEFAULT_DOWNLOAD_TEMPLATE: &str = "%{artist}/%{album}/%{track} - %{title}";
+
+/// A download template has to name a path *below* the downloads folder. bandcamp-dl is handed it
+/// verbatim, so an absolute template or a `..` step would put files anywhere on disk.
+fn template_stays_inside(template: &str) -> bool {
+    !template.starts_with(['/', '\\']) && !template.split(['/', '\\']).any(|part| part.trim() == "..")
+}
+
 fn env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
@@ -48,7 +57,14 @@ impl Config {
             download_concurrency: env_parse::<usize>("BC_DOWNLOAD_CONCURRENCY", 2).clamp(1, 8),
             download_timeout_s: env_parse("BC_DOWNLOAD_TIMEOUT_S", 2700),
             download_template: env("BC_DOWNLOAD_TEMPLATE")
-                .unwrap_or_else(|| "%{artist}/%{album}/%{track} - %{title}".into()),
+                .filter(|t| {
+                    let ok = template_stays_inside(t);
+                    if !ok {
+                        tracing::warn!("ignoring BC_DOWNLOAD_TEMPLATE={t:?}: it would write outside the downloads folder");
+                    }
+                    ok
+                })
+                .unwrap_or_else(|| DEFAULT_DOWNLOAD_TEMPLATE.into()),
             harvest_rate_per_sec: env_parse("BC_HARVEST_RATE_PER_SEC", 0.67),
             harvest_burst: env_parse("BC_HARVEST_BURST", 5),
             harvest_concurrency: env_parse("BC_HARVEST_CONCURRENCY", 4),
@@ -106,4 +122,18 @@ fn default_data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."));
     // Distinct from the Python app's `bcapp` dir so the original is never touched.
     base.join("bc-rust")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn templates_must_stay_below_the_downloads_folder() {
+        assert!(template_stays_inside(DEFAULT_DOWNLOAD_TEMPLATE));
+        assert!(template_stays_inside("%{label}/%{date} - %{album}/%{track} - %{title}"));
+        assert!(!template_stays_inside("/tmp/%{artist}/%{title}"));
+        assert!(!template_stays_inside("%{artist}/../../%{title}"));
+        assert!(!template_stays_inside("..\\%{title}"));
+    }
 }

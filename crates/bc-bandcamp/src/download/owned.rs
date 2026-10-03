@@ -45,9 +45,6 @@ pub const FORMATS: [(&str, &str, &str); 8] = [
     ("vorbis", "Ogg Vorbis", "ogg"),
 ];
 
-/// Audio extensions taken out of a purchase zip.
-const AUDIO_EXTS: [&str; 8] = ["flac", "mp3", "m4a", "ogg", "wav", "aiff", "aif", "opus"];
-
 /// How long the purchase index is trusted; a miss re-reads one older than [`RECHECK`] (a
 /// purchase made a minute ago is not in an index read an hour ago).
 const FRESH: Duration = Duration::from_secs(30 * 60);
@@ -365,7 +362,7 @@ fn place(mut reader: impl Read, dest: &Path) -> std::io::Result<()> {
 
 fn audio_ext(name: &str) -> Option<String> {
     let ext = Path::new(name).extension()?.to_string_lossy().to_ascii_lowercase();
-    AUDIO_EXTS.contains(&ext.as_str()).then_some(ext)
+    bc_core::audio::is_audio_ext(&ext).then_some(ext)
 }
 
 /// Unpack a downloaded purchase (a zip of tracks, or one audio file in `format`) into `layout`.

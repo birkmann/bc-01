@@ -206,6 +206,7 @@ backups). Environment variables override the defaults:
 |---|---|---|
 | `BC_DATA_DIR` | see above | database, caches, backups |
 | `BC_DOWNLOAD_DIR` | `$BC_DATA_DIR/downloads` | where downloads land |
+| `BC_DOWNLOAD_TEMPLATE` | `%{artist}/%{album}/%{track} - %{title}` | file layout below the downloads folder (bandcamp-dl tokens; also `%{trackartist}`, `%{date}`, `%{label}`) |
 | `BC_HOST`, `BC_PORT` | `127.0.0.1`, `8420` | server address |
 | `BC_AUDIO` | (system default) | `null` runs without an audio device |
 | `BC_MPRIS` | `1` | `0` disables media keys |

@@ -15,108 +15,15 @@
 
 use std::path::PathBuf;
 
-use unicode_general_category::{GeneralCategory, get_general_category};
-use unicode_normalization::UnicodeNormalization;
+pub use bc_core::slug::{EMPTY_ALBUM, EMPTY_ARTIST, EMPTY_TITLE, OK_CHARS, SPACE_CHAR, SlugOptions, slugify, slugify_with};
 
 /// `config.TEMPLATE`: the hierarchical layout used for every ordinary download.
-pub const DEFAULT_TEMPLATE: &str = "%{artist}/%{album}/%{track} - %{title}";
+pub const DEFAULT_TEMPLATE: &str = bc_core::config::DEFAULT_DOWNLOAD_TEMPLATE;
 
 /// No path separators, so a whole batch lands flat in one folder. The artist and
 /// album stay in the file name: they are what keeps two albums' "01 - Intro"
 /// from colliding once nothing separates them into directories.
 pub const FLAT_TEMPLATE: &str = "%{artist} - %{album} - %{track} - %{title}";
-
-/// `config.OK_CHARS`.
-pub const OK_CHARS: &str = "-_~";
-/// `config.SPACE_CHAR`.
-pub const SPACE_CHAR: &str = "-";
-
-/// The knobs `slugify_preset` passes through (bandcamp-dl CLI flags `-c -s -k -u`).
-#[derive(Debug, Clone)]
-pub struct SlugOptions {
-    pub ok_chars: String,
-    pub space_char: String,
-    pub keep_spaces: bool,
-    pub keep_upper: bool,
-}
-
-impl Default for SlugOptions {
-    fn default() -> Self {
-        Self {
-            ok_chars: OK_CHARS.to_string(),
-            space_char: SPACE_CHAR.to_string(),
-            keep_spaces: false,
-            keep_upper: false,
-        }
-    }
-}
-
-/// `slugify._sanitize`.
-fn sanitize(text: &str, ok: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        let cat = get_general_category(c);
-        let major = match cat {
-            GeneralCategory::UppercaseLetter
-            | GeneralCategory::LowercaseLetter
-            | GeneralCategory::TitlecaseLetter
-            | GeneralCategory::ModifierLetter
-            | GeneralCategory::OtherLetter
-            | GeneralCategory::DecimalNumber
-            | GeneralCategory::LetterNumber
-            | GeneralCategory::OtherNumber => 'L',
-            GeneralCategory::SpaceSeparator
-            | GeneralCategory::LineSeparator
-            | GeneralCategory::ParagraphSeparator => 'Z',
-            _ => 'x',
-        };
-        if major == 'L' || ok.contains(c) {
-            out.push(c);
-        } else if major == 'Z' {
-            out.push(' ');
-        }
-    }
-    // Python str.strip() strips Unicode whitespace; after sanitising only ' ' can
-    // be left over, but keep the semantics anyway.
-    out.trim().to_string()
-}
-
-/// `slugify.slugify(s, ok, only_ascii=False, spaces, lower, space_replacement)`.
-pub fn slugify_with(s: &str, opts: &SlugOptions) -> String {
-    let normalised: String = s.nfkc().collect();
-    let mut new = sanitize(&normalised, &opts.ok_chars);
-    if !opts.keep_spaces {
-        let mut rep = opts.space_char.clone();
-        if !rep.is_empty() && !opts.ok_chars.contains(&rep) {
-            rep = opts.ok_chars.chars().next().map(String::from).unwrap_or_default();
-        }
-        // re.sub('[%s\s]+' % rep, rep, new)
-        let is_sep = |c: char| c.is_whitespace() || rep.contains(c);
-        let mut collapsed = String::with_capacity(new.len());
-        let mut in_run = false;
-        for c in new.chars() {
-            if is_sep(c) {
-                if !in_run {
-                    collapsed.push_str(&rep);
-                    in_run = true;
-                }
-            } else {
-                collapsed.push(c);
-                in_run = false;
-            }
-        }
-        new = collapsed;
-    }
-    if !opts.keep_upper {
-        new = new.to_lowercase();
-    }
-    new
-}
-
-/// bandcamp-dl's default slug (`ok='-_~'`, `-` for spaces, lowercase).
-pub fn slugify(s: &str) -> String {
-    slugify_with(s, &SlugOptions::default())
-}
 
 /// The fields `template_to_path` reads (`track_meta` in `download_album`).
 #[derive(Debug, Clone, Default)]
@@ -143,9 +50,13 @@ pub fn strip_artist_prefix(title: &str, track_artist: Option<&str>) -> String {
     title.replacen(&needle, "", 1)
 }
 
-/// Expand `template` for one track exactly as `template_to_path` does (slugified,
-/// default options). Returns the path **relative to the base dir and without the
-/// `.mp3` extension** bandcamp-dl appends; see [`expected_file`].
+/// Expand `template` for one track as `template_to_path` does (slugified, default options).
+/// Returns the path **relative to the base dir and without the `.mp3` extension** bandcamp-dl
+/// appends; see [`expected_file`].
+///
+/// Two departures, both only where bandcamp-dl would fail outright: an empty artist, album or
+/// title becomes [`EMPTY_ARTIST`] / [`EMPTY_ALBUM`] / [`EMPTY_TITLE`], and each path component
+/// is capped at [`bc_core::slug::MAX_COMPONENT_BYTES`] so a long name cannot hit `ENAMETOOLONG`.
 pub fn expand_template(template: &str, meta: &TrackMeta) -> PathBuf {
     expand_template_with(template, meta, &SlugOptions::default(), false)
 }
@@ -158,13 +69,14 @@ pub fn expand_template_with(
     no_slugify: bool,
 ) -> PathBuf {
     let f = |s: &str| if no_slugify { s.to_string() } else { slugify_with(s, opts) };
+    let or = |s: String, empty: &str| if s.trim().is_empty() { empty.to_string() } else { s };
     let mut path = template.to_string();
     // Python order matters: trackartist, artist, album, title, date, label, track.
-    let trackartist = f(meta.artist.as_deref().unwrap_or(&meta.albumartist));
+    let trackartist = or(f(meta.artist.as_deref().unwrap_or(&meta.albumartist)), EMPTY_ARTIST);
     path = path.replace("%{trackartist}", &trackartist);
-    path = path.replace("%{artist}", &f(&meta.albumartist));
-    path = path.replace("%{album}", &f(&meta.album));
-    path = path.replace("%{title}", &f(&meta.title));
+    path = path.replace("%{artist}", &or(f(&meta.albumartist), EMPTY_ARTIST));
+    path = path.replace("%{album}", &or(f(&meta.album), EMPTY_ALBUM));
+    path = path.replace("%{title}", &or(f(&meta.title), EMPTY_TITLE));
     path = path.replace("%{date}", &f(&meta.date));
     path = path.replace("%{label}", &f(&meta.label));
     let track = match meta.track {
@@ -172,7 +84,7 @@ pub fn expand_template_with(
         Some(n) => format!("{n:02}"),
     };
     path = path.replace("%{track}", &track);
-    PathBuf::from(path)
+    path.split('/').map(bc_core::slug::cap_component).collect::<Vec<_>>().join("/").into()
 }
 
 /// Full expected audio path: `<base_dir>/<expanded>.mp3`.
@@ -185,45 +97,6 @@ pub fn expected_file(base_dir: &std::path::Path, template: &str, meta: &TrackMet
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn slugify_basics() {
-        assert_eq!(slugify("Feel The Music (Album)"), "feel-the-music-album");
-        assert_eq!(slugify("O.M.Theorem"), "omtheorem");
-        assert_eq!(slugify("Randstad & CASKO"), "randstad-casko");
-        assert_eq!(slugify("Drafted / Unthone"), "drafted-unthone");
-        assert_eq!(slugify("Closing Circle (You Can't Control Me)"), "closing-circle-you-cant-control-me");
-        assert_eq!(slugify("  Hello   World  "), "hello-world");
-        assert_eq!(slugify("a - b"), "a-b", "spaces and dashes collapse into one dash");
-        assert_eq!(slugify("a_b~c"), "a_b~c", "ok chars survive");
-        assert_eq!(slugify(""), "");
-    }
-
-    #[test]
-    fn slugify_keeps_unicode_letters_and_drops_marks() {
-        assert_eq!(slugify("Christian Wünsch"), "christian-wünsch");
-        assert_eq!(slugify("BRÄLLE"), "brälle");
-        // NFKC composes u + combining diaeresis, so it survives as a letter...
-        assert_eq!(slugify("Wu\u{308}nsch"), "wünsch");
-        // ...but a mark with no precomposed form is category M and is dropped.
-        assert_eq!(slugify("a\u{20DD}b"), "ab");
-        // Fullwidth forms fold through NFKC.
-        assert_eq!(slugify("ＡＢＣ１２３"), "abc123");
-        // Non-breaking space is category Zs: becomes a separator.
-        assert_eq!(slugify("a\u{a0}b"), "a-b");
-        assert_eq!(slugify("北京 (capital)"), "北京-capital");
-    }
-
-    #[test]
-    fn slugify_options() {
-        let keep = SlugOptions { keep_spaces: true, keep_upper: true, ..Default::default() };
-        assert_eq!(slugify_with("Hello  World", &keep), "Hello  World");
-        let under = SlugOptions { ok_chars: "-_~".into(), space_char: "_".into(), ..Default::default() };
-        assert_eq!(slugify_with("a b - c", &under), "a_b_-_c");
-        // A space char that is not an ok char falls back to the first ok char.
-        let odd = SlugOptions { space_char: "+".into(), ..Default::default() };
-        assert_eq!(slugify_with("a b", &odd), "a-b");
-    }
 
     fn meta(artist: &str, album: &str, track: Option<u32>, title: &str) -> TrackMeta {
         TrackMeta {
@@ -317,6 +190,32 @@ mod tests {
         // --no-slugify keeps the raw values.
         let raw = expand_template_with("%{artist}/%{title}", &m, &SlugOptions::default(), true);
         assert_eq!(raw, PathBuf::from("Alb Artist/Title"));
+    }
+
+    #[test]
+    fn names_that_slugify_to_nothing_get_a_placeholder() {
+        assert_eq!(expand_template(DEFAULT_TEMPLATE, &meta("!!!", "Louden Up Now", Some(1), "Pardon My Freedom")), PathBuf::from("unknown-artist/louden-up-now/01 - pardon-my-freedom"));
+        assert_eq!(expand_template(DEFAULT_TEMPLATE, &meta("Artist", "\u{1F525}\u{1F525}", Some(2), "???")), PathBuf::from("artist/untitled/02 - track"));
+        let mut m = meta("Alb", "A", Some(1), "T");
+        m.artist = Some("***".into());
+        assert_eq!(expand_template("%{trackartist}", &m), PathBuf::from("unknown-artist"));
+        // Optional fields stay empty: they are not path anchors.
+        m.date = String::new();
+        assert_eq!(expand_template("%{album} %{date}", &m), PathBuf::from("a "));
+    }
+
+    #[test]
+    fn every_component_fits_a_filesystem_name() {
+        let long = "北京".repeat(150);
+        let p = expand_template(DEFAULT_TEMPLATE, &meta(&long, &long, Some(1), &long));
+        for c in p.components() {
+            let n = c.as_os_str().len();
+            assert!(n <= bc_core::slug::MAX_COMPONENT_BYTES, "component of {n} bytes");
+        }
+        let flat = expand_template(FLAT_TEMPLATE, &meta(&long, &long, Some(1), &long));
+        assert_eq!(flat.components().count(), 1);
+        assert!(flat.as_os_str().len() <= bc_core::slug::MAX_COMPONENT_BYTES);
+        assert!(flat.to_string_lossy().starts_with("北京"), "the cut keeps the front of the name");
     }
 
     #[test]

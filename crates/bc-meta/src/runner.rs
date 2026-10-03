@@ -384,7 +384,7 @@ pub fn undo_job(ctx: &Ctx, job_id: &str) -> ApiResult<bc_types::library::UndoOut
 pub fn writable_extensions() -> Vec<String> {
     let mut v: Vec<String> = bc_media::tags::AUDIO_EXTENSIONS
         .iter()
-        .map(|e| e.to_string())
+        .map(|e| format!(".{e}"))
         .filter(|e| w::is_writable(std::path::Path::new(&format!("x{e}"))))
         .collect();
     v.sort();

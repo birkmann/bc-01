@@ -1,12 +1,13 @@
 //! Per-item staging directories (`<base>/.staging/item-<id>`): merge into the library tree, purge
 //! the stale ones, and clean up after a crash (partials, orphaned `bandcamp-dl` children).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use bc_db::Db;
 
 use crate::download::bcdl::is_audio_name;
+use crate::download::dedup::url_key;
 
 pub const STAGING_DIRNAME: &str = ".staging";
 
@@ -37,9 +38,14 @@ fn walk_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// Returns the final paths of the audio files moved; non-audio siblings (covers, playlists) move
 /// with them, `.tmp`/`.part` leftovers do not. A staging tree with no audio at all is just
 /// deleted: moving an orphaned cover into the library would litter the tree with empty album
-/// folders. `rename` is atomic on one filesystem, and overwriting is correct -- a fresh download
-/// beats whatever stale file was there.
-pub fn merge_staging(staging: &Path, target: &Path) -> Vec<PathBuf> {
+/// folders. `rename` is atomic on one filesystem, and overwriting this release's own files is
+/// correct -- a fresh download beats whatever stale file was there.
+///
+/// With `owner` (the library and the URL being downloaded), files the library files under a
+/// *different* release are never overwritten. Two records whose names slugify alike ("Untitled",
+/// "E.P." and "EP") get the same folder; the second one lands in `<album>-2` instead of renaming
+/// over the first one's tracks, and a lone colliding file becomes `<name> (2).<ext>`.
+pub fn merge_staging(staging: &Path, target: &Path, owner: Option<(&Db, &str)>) -> Vec<PathBuf> {
     if !staging.is_dir() {
         return Vec::new();
     }
@@ -49,15 +55,27 @@ pub fn merge_staging(staging: &Path, target: &Path) -> Vec<PathBuf> {
     files.sort();
     let mut audio = Vec::new();
     if files.iter().any(|p| is_audio_name(&p.to_string_lossy())) {
+        let guard = owner.map(|(db, url)| Guard { db, url: url_key(url) });
+        let mut dirs: HashMap<PathBuf, PathBuf> = HashMap::new();
         for src in &files {
             let Ok(rel) = src.strip_prefix(staging) else { continue };
-            let dest = target.join(rel);
-            if let Some(parent) = dest.parent() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    tracing::warn!("cannot create {}: {e}", parent.display());
-                    continue;
-                }
+            let Some(name) = rel.file_name() else { continue };
+            let rel_dir = rel.parent().unwrap_or(Path::new(""));
+            let dir = dirs
+                .entry(rel_dir.to_path_buf())
+                .or_insert_with(|| match &guard {
+                    Some(g) => g.free_dir(target, rel_dir),
+                    None => target.join(rel_dir),
+                })
+                .clone();
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                tracing::warn!("cannot create {}: {e}", dir.display());
+                continue;
             }
+            let dest = match &guard {
+                Some(g) => g.free_file(&dir, Path::new(name)),
+                None => dir.join(name),
+            };
             match std::fs::rename(src, &dest) {
                 Ok(()) => {
                     if is_audio_name(&dest.to_string_lossy()) {
@@ -70,6 +88,100 @@ pub fn merge_staging(staging: &Path, target: &Path) -> Vec<PathBuf> {
     }
     let _ = std::fs::remove_dir_all(staging);
     audio
+}
+
+/// Who the library says a folder or file already belongs to.
+#[derive(Debug, PartialEq)]
+enum Claim {
+    /// Nothing on disk, or nothing the library knows about: safe to write into.
+    Free,
+    /// The release being downloaded: overwriting it is a refresh.
+    Ours,
+    /// Another release (or one with no URL, which might be anything): hands off.
+    Theirs,
+}
+
+struct Guard<'a> {
+    db: &'a Db,
+    /// `url_key` of the release being downloaded.
+    url: String,
+}
+
+impl Guard<'_> {
+    /// `target/rel_dir`, or the first `<last>-N` sibling of it that is not another release's.
+    /// Only the album folder moves: `target` itself (a shelf, a flat batch) is shared by design.
+    fn free_dir(&self, target: &Path, rel_dir: &Path) -> PathBuf {
+        let wanted = target.join(rel_dir);
+        let Some(leaf) = rel_dir.file_name().map(|n| n.to_string_lossy().into_owned()) else { return wanted };
+        if self.dir_claim(&wanted) != Claim::Theirs {
+            return wanted;
+        }
+        let parent = wanted.parent().unwrap_or(target).to_path_buf();
+        for n in 2.. {
+            let cand = parent.join(format!("{leaf}-{n}"));
+            if !cand.exists() || self.dir_claim(&cand) == Claim::Ours {
+                tracing::warn!("{} belongs to another release; {} goes to {}", wanted.display(), self.url, cand.display());
+                return cand;
+            }
+        }
+        unreachable!()
+    }
+
+    /// `dir/name`, or `dir/<stem> (N).<ext>` when `dir/name` is another release's file.
+    fn free_file(&self, dir: &Path, name: &Path) -> PathBuf {
+        let wanted = dir.join(name);
+        if !wanted.exists() || self.file_claim(&wanted) != Claim::Theirs {
+            return wanted;
+        }
+        let stem = name.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let ext = name.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        for n in 2.. {
+            let cand = dir.join(format!("{stem} ({n}){ext}"));
+            if !cand.exists() || self.file_claim(&cand) == Claim::Ours {
+                tracing::warn!("{} belongs to another release; kept it and wrote {}", wanted.display(), cand.display());
+                return cand;
+            }
+        }
+        unreachable!()
+    }
+
+    fn dir_claim(&self, dir: &Path) -> Claim {
+        if !dir.exists() {
+            return Claim::Free;
+        }
+        self.claim("SELECT bandcamp_url FROM releases WHERE folder_path IN (?1, ?2)", dir)
+    }
+
+    fn file_claim(&self, file: &Path) -> Claim {
+        self.claim(
+            "SELECT r.bandcamp_url FROM files f JOIN tracks t ON t.id = f.track_id \
+             JOIN releases r ON r.id = t.release_id WHERE f.path IN (?1, ?2)",
+            file,
+        )
+    }
+
+    /// The release URLs `sql` finds for `path` (as given and canonicalised -- rows store
+    /// whichever form the ingest saw), boiled down to one verdict. Unreadable means `Free`: the
+    /// guard never makes a download fail, it only steers where the files go.
+    fn claim(&self, sql: &str, path: &Path) -> Claim {
+        let raw = path.to_string_lossy().into_owned();
+        let canon = std::fs::canonicalize(path).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| raw.clone());
+        let urls = self
+            .db
+            .read(|c| {
+                let mut st = c.prepare(sql)?;
+                let v = st.query_map([&raw, &canon], |r| r.get::<_, Option<String>>(0))?.collect::<Result<Vec<_>, _>>()?;
+                Ok(v)
+            })
+            .unwrap_or_default();
+        if urls.is_empty() {
+            Claim::Free
+        } else if urls.iter().flatten().any(|u| url_key(u) == self.url) {
+            Claim::Ours
+        } else {
+            Claim::Theirs
+        }
+    }
 }
 
 /// Ids of the download items that still need their staging dir (`pending` or `running`).

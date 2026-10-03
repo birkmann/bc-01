@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bc_core::paths::safe_subdir_name;
+use bc_db::Db;
 use bc_jobs::{Complete, HandlerOutcome, ItemCtx, JobItem, NewItem};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -199,7 +200,7 @@ impl DownloadHandler {
             // Merge the whole staging tree, not just this attempt's diff: after a resumed retry the
             // earlier attempts' tracks are in staging but were never ingested (a retryable partial
             // ingests nothing, so `.staging/` paths never reach the database).
-            let merged = merge_blocking(staging.clone(), target.clone()).await;
+            let merged = merge_blocking(self.deps.db.clone(), url.clone(), staging.clone(), target.clone()).await;
             // Read before completion replaces it with where the download actually landed.
             let queued_release_id = item.release_id;
             let ingested =
@@ -264,7 +265,7 @@ impl DownloadHandler {
         if !will_retry {
             // Terminal failure: salvage whatever audio did land so a mostly-complete album is not
             // thrown away with the item.
-            let merged = merge_blocking(staging.clone(), target.clone()).await;
+            let merged = merge_blocking(self.deps.db.clone(), url.clone(), staging.clone(), target.clone()).await;
             if !merged.is_empty() {
                 let salvaged = self.ingest(&ctx, &base, &merged, &url, url_kind.as_deref(), &params).await;
                 // A salvaged album is incomplete by definition; record how long it should be, so
@@ -567,8 +568,8 @@ impl DownloadHandler {
     }
 }
 
-async fn merge_blocking(staging: PathBuf, target: PathBuf) -> Vec<PathBuf> {
-    tokio::task::spawn_blocking(move || merge_staging(&staging, &target)).await.unwrap_or_default()
+async fn merge_blocking(db: Db, url: String, staging: PathBuf, target: PathBuf) -> Vec<PathBuf> {
+    tokio::task::spawn_blocking(move || merge_staging(&staging, &target, Some((&db, &url)))).await.unwrap_or_default()
 }
 
 /// Mirror failures to `error.log` (`job_items.last_error` is authoritative; this file just makes

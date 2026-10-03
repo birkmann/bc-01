@@ -5,9 +5,6 @@ use std::collections::HashSet;
 use bc_db::rusqlite::{Connection, OptionalExtension, Transaction};
 use bc_libcore::ApiResult;
 
-/// Extensions the scanner treats as audio (used to decide a folder "still holds music").
-pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "opus", "wav", "aiff", "wma"];
-
 /// `[1,2,3]` as JSON text for `IN (SELECT value FROM json_each(?))`: any number of ids in one
 /// statement, no 999-parameter ceiling.
 pub fn ids_json(ids: &[i64]) -> String {
@@ -40,11 +37,9 @@ pub fn set_setting(t: &Transaction<'_>, key: &str, value: &str) -> ApiResult<()>
     Ok(())
 }
 
+/// Whether `path` is audio by extension (used to decide a folder "still holds music").
 pub fn has_audio_ext(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
-        .unwrap_or(false)
+    bc_core::audio::is_audio_path(path)
 }
 
 /// Canonicalise the longest existing prefix of `p` (so a path that was just deleted can still be

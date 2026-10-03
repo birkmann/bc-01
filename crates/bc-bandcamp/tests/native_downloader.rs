@@ -377,11 +377,10 @@ async fn flat_template_and_spec_template_are_honoured() {
     s.template = Some(FLAT_TEMPLATE.into());
     let (o, _) = run(&e, &s).await;
     assert_eq!(o.kind, OutcomeKind::Ok, "{o:?}");
-    let want = e.base.join("the-artist-the-album-01-one.mp3");
     // FLAT_TEMPLATE has " - " separators which are not slugified (only the fields are).
     let want_flat = slug::expected_file(&e.base, FLAT_TEMPLATE, &meta("One", Some(1)));
     assert_eq!(o.new_files, vec![want_flat.clone()]);
-    assert_eq!(want_flat.parent(), Some(e.base.as_path()), "flat: directly in base ({want:?})");
+    assert_eq!(want_flat.parent(), Some(e.base.as_path()), "flat: directly in base");
     assert!(want_flat.exists());
 }
 

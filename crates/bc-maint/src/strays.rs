@@ -39,41 +39,12 @@ use crate::{completeness, delete, snippets, tidy};
 
 // ---------------------------------------------------------------------------- where bandcamp-dl would have put it
 
-fn sanitize(text: &str) -> String {
-    let mut kept = String::new();
-    for c in text.chars() {
-        if c.is_alphabetic() || c.is_numeric() || "-_~".contains(c) {
-            kept.push(c);
-        } else if c.is_whitespace() && !c.is_control() {
-            kept.push(' ');
-        }
-    }
-    kept.trim().to_string()
-}
-
-/// The directory name bandcamp-dl gives an album, reproduced exactly. A merged track has to land
-/// where the *rest* of the record will land when the album is filled, or the album ends up split
-/// across two folders. bandcamp-dl slugifies each part with `unicode_slugify`'s defaults: keep
-/// letters, numbers and `-_~`, collapse runs of whitespace and hyphens into one hyphen,
-/// lower-case, keep non-ASCII letters as they are. (A title like "???" slugifies to nothing.)
+/// The directory name bandcamp-dl gives an album or artist, as the downloader writes it
+/// (`bc_core::slug`). A merged track has to land where the *rest* of the record will land when the
+/// album is filled, or the album ends up split across two folders. A title like "???" slugifies
+/// to nothing; callers fall back to the downloader's placeholders.
 pub fn folder_slug(title: &str) -> String {
-    use unicode_normalization::UnicodeNormalization;
-    let nfkc: String = title.nfkc().collect();
-    let clean = sanitize(&nfkc);
-    let mut out = String::new();
-    let mut in_run = false;
-    for c in clean.chars() {
-        if c == '-' || c.is_whitespace() {
-            if !in_run {
-                out.push('-');
-            }
-            in_run = true;
-        } else {
-            out.push(c);
-            in_run = false;
-        }
-    }
-    out.to_lowercase()
+    bc_core::slug::cap_component(&bc_core::slug::slugify(title)).to_string()
 }
 
 // ---------------------------------------------------------------------------- finding them
@@ -588,13 +559,13 @@ fn album_folder(c: &Connection, target: i64, album: &AlbumInfo, source: &Path) -
     if let Some(f) = folder_path.filter(|f| Path::new(f).is_dir()) {
         return Ok(PathBuf::from(f));
     }
-    let leaf = [folder_slug(&album.title), folder_slug(&target_title)].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "album".into());
+    let leaf = [folder_slug(&album.title), folder_slug(&target_title)].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| bc_core::slug::EMPTY_ALBUM.into());
     let artist_dir = source.parent().and_then(Path::parent).unwrap_or(source);
     // The album artist, not the track's: a compilation lands under "Various Artists", and a stray
     // of it sits in its own artist's directory. The album folder has to be where the *rest of the
     // record* will download to, or filling it splits the album across two folders.
-    let wanted = folder_slug(&album.artist_name);
-    if !wanted.is_empty() && artist_dir.file_name().map(|n| n.to_string_lossy() != wanted).unwrap_or(true) {
+    let wanted = Some(folder_slug(&album.artist_name)).filter(|s| !s.is_empty()).unwrap_or_else(|| bc_core::slug::EMPTY_ARTIST.into());
+    if artist_dir.file_name().map(|n| n.to_string_lossy() != wanted).unwrap_or(true) {
         let moved = artist_dir.parent().unwrap_or(artist_dir).join(&wanted);
         if root_of(&root_paths(c)?, &moved).is_some() {
             return Ok(moved.join(leaf));

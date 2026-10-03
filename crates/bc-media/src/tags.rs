@@ -39,10 +39,8 @@ use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 
-/// Extensions the scanner treats as audio (lower case, with leading dot).
-pub const AUDIO_EXTENSIONS: [&str; 10] = [
-    ".mp3", ".flac", ".m4a", ".mp4", ".aac", ".ogg", ".opus", ".wav", ".aiff", ".wma",
-];
+/// Extensions the scanner treats as audio (lower case, no leading dot).
+pub use bc_core::audio::AUDIO_EXTENSIONS;
 
 /// Sidecar cover file stems, in priority order.
 pub const COVER_STEMS: [&str; 5] = ["cover", "folder", "front", "album", "artwork"];
@@ -51,13 +49,7 @@ pub const COVER_EXTENSIONS: [&str; 5] = [".jpg", ".jpeg", ".png", ".gif", ".webp
 
 /// True when `path` has a known audio extension (case-insensitive).
 pub fn is_audio_path(path: &Path) -> bool {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => {
-            let dotted = format!(".{}", ext.to_ascii_lowercase());
-            AUDIO_EXTENSIONS.contains(&dotted.as_str())
-        }
-        None => false,
-    }
+    bc_core::audio::is_audio_path(path)
 }
 
 /// One track's tags, normalised across ID3 / Vorbis / MP4.

@@ -744,6 +744,8 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "unicode-general-category",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -953,7 +955,6 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
- "unicode-normalization",
  "uuid",
  "walkdir",
 ]

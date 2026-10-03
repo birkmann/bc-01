@@ -32,7 +32,7 @@ fn merge_staging_moves_the_tree_and_reports_audio() {
     write(&album.join("03 - c.mp3.part"), b"partial");
     let target = tmp.path().join("downloads");
 
-    let audio = merge_staging(&staging, &target);
+    let audio = merge_staging(&staging, &target, None);
 
     assert_eq!(audio, vec![target.join("Artist").join("Album").join("01 - a.mp3")]);
     assert!(target.join("Artist/Album/cover.jpg").exists(), "art travels with the music");
@@ -47,9 +47,112 @@ fn merge_staging_discards_a_tree_with_no_audio() {
     write(&staging.join("Artist/Album/cover.jpg"), b"\xff\xd8\xff");
     let target = tmp.path().join("downloads");
 
-    assert!(merge_staging(&staging, &target).is_empty());
+    assert!(merge_staging(&staging, &target, None).is_empty());
     assert!(!staging.exists());
     assert!(!target.exists());
+}
+
+/// File `files` under one release with `url`, as the library would after ingesting them.
+fn own(db: &bc_db::Db, root: &Path, url: Option<&str>, files: &[&Path]) {
+    let folder = files[0].parent().expect("parent").to_string_lossy().into_owned();
+    let paths: Vec<String> = files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let (root, url) = (root.to_string_lossy().into_owned(), url.map(str::to_string));
+    db.write(move |t| {
+        t.execute("INSERT OR IGNORE INTO library_roots(path, kind, watch, enabled) VALUES (?1, 'downloads', 0, 1)", [&root])?;
+        let root_id: i64 = t.query_row("SELECT id FROM library_roots WHERE path = ?1", [&root], |r| r.get(0))?;
+        t.execute(
+            "INSERT INTO releases(title, title_key, kind, bandcamp_url, folder_path, added_at) \
+             VALUES ('Untitled', 'untitled', 'album', ?1, ?2, CURRENT_TIMESTAMP)",
+            params![url, folder],
+        )?;
+        let release_id = t.last_insert_rowid();
+        for p in &paths {
+            t.execute(
+                "INSERT INTO tracks(release_id, title, title_key, loved, play_count, skip_count, added_at) \
+                 VALUES (?1, 't', 't', 0, 0, 0, CURRENT_TIMESTAMP)",
+                [release_id],
+            )?;
+            let track_id = t.last_insert_rowid();
+            t.execute(
+                "INSERT INTO files(track_id, root_id, path, rel_path, ext, size_bytes, mtime_ns, first_seen_at, last_seen_at) \
+                 VALUES (?1, ?2, ?3, '', 'mp3', 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                params![track_id, root_id, p],
+            )?;
+        }
+        Ok(())
+    })
+    .expect("own");
+}
+
+const THEIRS: &str = "https://one.bandcamp.com/album/untitled";
+const OURS: &str = "https://two.bandcamp.com/album/untitled";
+
+#[test]
+fn merge_staging_never_overwrites_another_releases_album() {
+    let env = Env::new();
+    let target = env.dir.path().join("downloads");
+    let theirs = target.join("artist/untitled/01 - intro.mp3");
+    write(&theirs, b"theirs");
+    own(&env.db, &target, Some(THEIRS), &[&theirs]);
+    let staging = env.dir.path().join(".staging/item-1");
+    write(&staging.join("artist/untitled/01 - intro.mp3"), b"ours");
+
+    let audio = merge_staging(&staging, &target, Some((&env.db, OURS)));
+
+    let moved = target.join("artist/untitled-2/01 - intro.mp3");
+    assert_eq!(audio, vec![moved.clone()]);
+    assert_eq!(std::fs::read(&theirs).expect("read"), b"theirs", "the other record is untouched");
+    assert_eq!(std::fs::read(&moved).expect("read"), b"ours");
+
+    // A retry of the same record finds its own folder again instead of opening a third.
+    own(&env.db, &target, Some(OURS), &[&moved]);
+    write(&staging.join("artist/untitled/02 - outro.mp3"), b"ours too");
+    let audio = merge_staging(&staging, &target, Some((&env.db, &format!("{OURS}/"))));
+    assert_eq!(audio, vec![target.join("artist/untitled-2/02 - outro.mp3")]);
+}
+
+#[test]
+fn merge_staging_refreshes_its_own_release_in_place() {
+    let env = Env::new();
+    let target = env.dir.path().join("downloads");
+    let old = target.join("artist/untitled/01 - intro.mp3");
+    write(&old, b"stale");
+    own(&env.db, &target, Some(OURS), &[&old]);
+    let staging = env.dir.path().join(".staging/item-1");
+    write(&staging.join("artist/untitled/01 - intro.mp3"), b"fresh");
+
+    let audio = merge_staging(&staging, &target, Some((&env.db, OURS)));
+
+    assert_eq!(audio, vec![old.clone()]);
+    assert_eq!(std::fs::read(&old).expect("read"), b"fresh");
+    assert!(!target.join("artist/untitled-2").exists());
+}
+
+#[test]
+fn merge_staging_keeps_a_colliding_flat_file_beside_the_other() {
+    let env = Env::new();
+    let target = env.dir.path().join("downloads/batch");
+    let theirs = target.join("a - untitled - 01 - intro.mp3");
+    write(&theirs, b"theirs");
+    // No URL: the library cannot tell whose it is, so it is not ours to replace.
+    own(&env.db, &target, None, &[&theirs]);
+    let staging = env.dir.path().join(".staging/item-1");
+    write(&staging.join("a - untitled - 01 - intro.mp3"), b"ours");
+
+    let audio = merge_staging(&staging, &target, Some((&env.db, OURS)));
+
+    assert_eq!(audio, vec![target.join("a - untitled - 01 - intro (2).mp3")]);
+    assert_eq!(std::fs::read(&theirs).expect("read"), b"theirs");
+}
+
+#[test]
+fn merge_staging_keeps_aif_purchases() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let staging = tmp.path().join(".staging/item-1");
+    write(&staging.join("artist/album/01 - a.aif"), b"FORM");
+    let target = tmp.path().join("downloads");
+
+    assert_eq!(merge_staging(&staging, &target, None), vec![target.join("artist/album/01 - a.aif")]);
 }
 
 // -- the worker end to end ----------------------------------------------------------------------

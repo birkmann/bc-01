@@ -53,9 +53,6 @@ pub use super::slug::{DEFAULT_TEMPLATE, FLAT_TEMPLATE};
 use super::verify::classify;
 use super::{DownloadSpec, Downloader, Outcome, OutcomeKind, Progress, ProgressFn};
 
-/// `services/metadata/model.py::AUDIO_EXTENSIONS`.
-pub const AUDIO_EXTENSIONS: &[&str] =
-    &[".mp3", ".flac", ".m4a", ".mp4", ".aac", ".ogg", ".opus", ".wav", ".aiff", ".wma"];
 /// `services/metadata/model.py::COVER_EXTENSIONS`.
 pub const COVER_EXTENSIONS: &[&str] = &[".jpg", ".jpeg", ".png", ".gif", ".webp"];
 /// `services/metadata/model.py::COVER_STEMS`.
@@ -71,7 +68,7 @@ fn suffix_lower(name: &str) -> String {
 
 /// Whether a (relative) path names an audio file by extension.
 pub fn is_audio_name(name: &str) -> bool {
-    AUDIO_EXTENSIONS.contains(&suffix_lower(name).as_str())
+    bc_core::audio::is_audio_path(Path::new(name))
 }
 
 fn is_cover_name(name: &str) -> bool {
