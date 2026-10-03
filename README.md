@@ -103,24 +103,45 @@ To build it yourself (Rust with the `wasm32-unknown-unknown` target, `trunk`,
 
 ### Uninstalling
 
-Quit bc first. Then remove the app the way it was installed:
+Quit bc first. Then run only the block for the way you installed it (pacman
+reports `target not found: bc-rust` when bc was not installed as a package).
+
+AppImage:
 
 ```sh
-# AppImage: delete the file
 rm ~/Downloads/bc-linux-x86_64.AppImage   # wherever you put it
+```
 
-# scripts/install.sh (use the same PREFIX, and sudo, if you changed it)
+`scripts/install.sh` (use the same `PREFIX`, and `sudo`, if you changed it):
+
+```sh
 PREFIX=~/.local
 rm -f "$PREFIX"/bin/{bc-desktop,bc-rust,bc-analysis-tool} \
       "$PREFIX"/share/applications/bc.desktop \
       "$PREFIX"/share/icons/hicolor/*/apps/bc.{png,svg}
 rm -rf "$PREFIX"/share/licenses/bc-rust
+```
 
-# Arch package
+Arch package:
+
+```sh
 sudo pacman -R bc-rust
+```
 
-# macOS
+macOS:
+
+```sh
 rm -rf /Applications/bc.app
+```
+
+On Linux, a Chromium-family browser also adds its own **bc** launcher (and
+icons) for the bc window to the application menu. Remove it after any of the
+Linux methods above:
+
+```sh
+for f in $(grep -l 'bc-rust/window-profile' ~/.local/share/applications/*.desktop); do
+    rm -f "$f" ~/.local/share/icons/hicolor/*/apps/"$(basename "$f" .desktop)".png
+done
 ```
 
 This leaves your library database, settings, caches and downloads in place,
@@ -132,8 +153,6 @@ touched):
 ```sh
 # Linux
 rm -rf ~/.local/share/bc-rust            # data, caches, backups, browser profiles
-# the launcher entry Chromium created for the bc web app, if any
-grep -l 'bc-rust/window-profile' ~/.local/share/applications/*.desktop | xargs -r rm
 secret-tool clear service bc-rust        # Bandcamp sign-in in the keyring
 
 # macOS
