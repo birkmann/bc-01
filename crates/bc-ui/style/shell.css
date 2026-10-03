@@ -17,7 +17,7 @@
 .splitter::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: transparent; transition: background var(--dur-fast); }
 .splitter:hover::after, .splitter:focus-visible::after, .splitter.dragging::after { background: var(--color-accent); }
 html.col-resizing, html.col-resizing * { cursor: col-resize !important; user-select: none !important; }
-html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
+html.col-resizing .sidebar, html.col-resizing .hb-gutter { transition: none; }
 .sb-splitter { display: none; margin: 0 -5px; }
 @media (min-width: 1024px) { .sb-splitter { display: block; } }
 .sb-head { display: flex; align-items: center; gap: 10px; height: var(--topbar-h); padding: 0 14px; flex: none; }
@@ -70,17 +70,14 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
 @keyframes drawer-in { from { transform: translateX(-100%); } to { transform: none; } }
 .drawer .nav-item { height: 46px; }
 
-/* App header: one strip across the top (frame, header and sidebar share surface-0). The brand
+/* App header: one strip across the top (frame, header and sidebar share surface-0). The leading
    cell is as wide as the sidebar column so the divider after it continues the sidebar edge. */
 .topbar { display: flex; align-items: center; gap: 12px; height: var(--header-h); flex: none; padding: 0 8px 0 0; border-bottom: 1px solid var(--color-line-subtle); background: var(--color-surface-0); position: relative; z-index: 5; padding-top: env(safe-area-inset-top); box-sizing: content-box; }
 .topbar .search { flex: 1; max-width: 560px; margin: 0 auto; }
 .topbar .only-mobile { display: inline-flex; }
 .topbar .btn-ghost:hover:not(:disabled) { background: var(--color-surface-3); }
-.hb-brand { flex: none; display: flex; align-items: center; width: calc(var(--sidebar-w) - 13px); padding-left: 13px; transition: width var(--dur-base) var(--ease), padding var(--dur-base) var(--ease); }
-.topbar.rail .hb-brand { width: calc(var(--rail-w) - 13px); padding-left: 17px; }
-/* Sized like rille's title bar lockup; the mark stays centred over the nav icons below. */
-.topbar .brand-word { font-size: 20px; }
-.topbar.rail .brand-word { display: none; }
+.hb-gutter { flex: none; width: calc(var(--sidebar-w) - 13px); transition: width var(--dur-base) var(--ease); }
+.topbar.rail .hb-gutter { width: calc(var(--rail-w) - 13px); }
 .hb-div { flex: none; width: 1px; height: 18px; background: var(--color-line); }
 .hb-hist { flex: none; display: flex; align-items: center; gap: 2px; }
 .hb-leds { flex: none; display: flex; align-items: center; gap: 12px; }
@@ -96,10 +93,9 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
 @media (min-width: 1024px) { .topbar .only-mobile { display: none; } }
 @media (max-width: 1023px) {
   .topbar { padding-left: 6px; gap: 10px; }
-  .hb-brand, .topbar.rail .hb-brand { width: auto; padding-left: 0; }
-  .topbar.rail .brand-word { display: inline; }
+  .hb-gutter { display: none; }
 }
-@media (max-width: 640px) { .hb-hist, .hb-leds, .hb-clock, .topbar .hb-div, .topbar .brand-word { display: none; } }
+@media (max-width: 640px) { .hb-hist, .hb-leds, .hb-clock, .topbar .hb-div { display: none; } }
 /* Desktop app with the title strip folded away (Window Controls Overlay): the header is the title
    bar. It drags the window, its controls stay clickable, and it keeps clear of the browser's window
    buttons, which sit in whatever part of the top edge the titlebar area leaves out. */

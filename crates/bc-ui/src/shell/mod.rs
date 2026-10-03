@@ -24,7 +24,7 @@ pub fn Shell(children: Children) -> impl IntoView {
     crate::shortcuts::install();
     crate::history::install();
     let loc = use_location();
-    // The sidebar width is a root variable: the header's brand cell follows it.
+    // The sidebar width is a root variable: the header's leading cell follows it.
     let sidebar_w = SIDEBAR.signal();
     Effect::new(move |_| {
         let _ = crate::util::document_element().style().set_property("--sidebar-w", &format!("{}px", sidebar_w.get()));

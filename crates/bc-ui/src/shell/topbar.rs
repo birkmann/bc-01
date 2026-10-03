@@ -5,7 +5,7 @@ use bc_types::jobs::{KIND_ANALYZE, KIND_DOWNLOAD};
 
 use crate::app::use_app;
 use crate::data::{use_jobs, ws_connected};
-use crate::ds::{BrandLockup, Button, Icon, SearchInput, ToastCentre, Variant, use_debounced};
+use crate::ds::{Button, Icon, SearchInput, ToastCentre, Variant, use_debounced};
 use crate::history::{self, Dir};
 
 /// One status light: a dot and a small-caps label, with the detail in the tooltip.
@@ -57,8 +57,8 @@ fn Clock() -> impl IntoView {
     view! { <span class="hb-clock" title="Local time">{move || text.get()}</span> }
 }
 
-/// App header, full width above sidebar and content: brand lockup (aligned with the sidebar
-/// column), status lights, library search (debounced 120 ms), clock, palette and settings.
+/// App header, full width above sidebar and content: an empty cell as wide as the sidebar
+/// column, status lights, library search (debounced 120 ms), clock, palette and settings.
 #[component]
 pub fn TopBar() -> impl IntoView {
     let app = use_app();
@@ -123,7 +123,7 @@ pub fn TopBar() -> impl IntoView {
     view! {
         <header class=move || if app.nav_collapsed.get() { "topbar rail" } else { "topbar" }>
             <Button variant=Variant::Ghost icon="menu" title="Open navigation" class="only-mobile" on_click=move |_| app.nav_open.set(true) />
-            <div class="hb-brand"><BrandLockup size=22 /></div>
+            <div class="hb-gutter"></div>
             <span class="hb-div"></span>
             <div class="hb-hist">
                 <HistoryButton dir=Dir::Back />
