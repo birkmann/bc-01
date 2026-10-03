@@ -133,6 +133,29 @@ pub fn scan_count(seen: i64, total: Option<i64>) -> String {
     }
 }
 
+/// A scan's running time: "45s", "12m 05s", "3h 07m".
+pub fn scan_span(ms: f64) -> String {
+    let total = (ms.max(0.0) / 1000.0).round() as u64;
+    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
+    if h > 0 {
+        format!("{h}h {m:02}m")
+    } else if m > 0 {
+        format!("{m}m {s:02}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// When a scan started or should finish, as the local clock shows it: "14:05", or with the
+/// weekday ("Sat 02:15") when it is not today.
+pub fn scan_clock(hours: u32, minutes: u32, weekday: Option<u32>) -> String {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    match weekday {
+        Some(d) => format!("{} {hours:02}:{minutes:02}", DAYS[d as usize % 7]),
+        None => format!("{hours:02}:{minutes:02}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +230,17 @@ mod tests {
         assert_eq!(scan_count(5, None), "5 files");
         assert_eq!(scan_count(5, Some(0)), "5 files");
         assert_eq!(scan_phase_label(None), scan_phase_label(Some("queued")));
+    }
+
+    #[test]
+    fn scan_times() {
+        assert_eq!(scan_span(0.0), "0s");
+        assert_eq!(scan_span(-5.0), "0s");
+        assert_eq!(scan_span(45_000.0), "45s");
+        assert_eq!(scan_span(725_000.0), "12m 05s");
+        assert_eq!(scan_span(11_220_000.0), "3h 07m");
+        assert_eq!(scan_clock(9, 5, None), "09:05");
+        assert_eq!(scan_clock(2, 15, Some(6)), "Sat 02:15");
     }
 
     #[test]

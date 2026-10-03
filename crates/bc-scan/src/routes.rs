@@ -153,23 +153,42 @@ pub fn run_scan_task(ctx: Ctx, handle: bc_libcore::JobHandle, ids: Vec<i64>) {
 /// Scan `ids` in order until one fails or `cancel` is set; the results so far and the failure.
 fn scan_roots(ctx: &Ctx, handle: &bc_libcore::JobHandle, ids: Vec<i64>, cancel: &AtomicBool) -> (Vec<ScanResult>, Option<String>) {
     let mut results: Vec<ScanResult> = Vec::new();
+    let started = Instant::now();
     for id in ids {
         if cancel.load(Ordering::Relaxed) || handle.cancelled() {
             break;
         }
         let mut last = Instant::now() - Duration::from_secs(1);
+        // When this root's files started going in (the walk has no total) and how many were in.
+        let mut base: Option<(Instant, i64)> = None;
         let h = handle.clone();
         let bus = ctx.bus.clone();
         let mut prog = move |phase: &'static str, seen: i64, total: i64| {
+            if total > 0 && base.is_none() {
+                base = Some((Instant::now(), seen));
+            }
             if phase != "done" && last.elapsed() < Duration::from_millis(250) {
                 return;
             }
             last = Instant::now();
             let total_opt = (total > 0).then_some(total);
+            let eta_ms = match (phase, base) {
+                ("done", _) => Some(0),
+                (_, Some((t0, seen0))) => eta_ms(seen - seen0, total - seen, t0.elapsed().as_millis() as i64),
+                _ => None,
+            };
             h.progress(seen, total_opt, Some(&progress_msg(phase, Some(id))));
             bus.publish(
                 TOPIC_LIBRARY_SCAN_PROGRESS,
-                &ScanProgress { job_id: h.id.clone(), root_id: id, phase: phase.into(), seen, total: total_opt },
+                &ScanProgress {
+                    job_id: h.id.clone(),
+                    root_id: id,
+                    phase: phase.into(),
+                    seen,
+                    total: total_opt,
+                    elapsed_ms: started.elapsed().as_millis() as i64,
+                    eta_ms,
+                },
             );
         };
         match scan_root(ctx, id, ScanHooks { progress: Some(&mut prog), cancel }) {
@@ -178,6 +197,15 @@ fn scan_roots(ctx: &Ctx, handle: &bc_libcore::JobHandle, ids: Vec<i64>, cancel: 
         }
     }
     (results, None)
+}
+
+/// Time left for `remaining` files when `done` went in over `spent_ms`. `None` until a few
+/// seconds and files give a rate worth showing.
+fn eta_ms(done: i64, remaining: i64, spent_ms: i64) -> Option<i64> {
+    if remaining <= 0 {
+        return Some(0);
+    }
+    (done > 0 && spent_ms >= 3_000).then(|| (remaining as f64 * spent_ms as f64 / done as f64).round() as i64)
 }
 
 /// Ask a running scan to stop. It stops between files (or directories, while walking); what
@@ -214,4 +242,17 @@ async fn scan_status(State(ctx): State<Ctx>, Path(job_id): Path<String>) -> ApiR
         total: t.total,
         results,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eta_ms;
+
+    #[test]
+    fn eta_needs_a_rate_and_scales_with_it() {
+        assert_eq!(eta_ms(0, 100, 10_000), None);
+        assert_eq!(eta_ms(50, 100, 1_000), None);
+        assert_eq!(eta_ms(50, 100, 10_000), Some(20_000));
+        assert_eq!(eta_ms(50, 0, 10_000), Some(0));
+    }
 }

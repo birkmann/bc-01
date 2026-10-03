@@ -1038,6 +1038,13 @@ pub struct ScanProgress {
     pub phase: String,
     pub seen: i64,
     pub total: Option<i64>,
+    /// Time since the scan started. A duration, not a timestamp, so a client on another
+    /// machine anchors it to its own clock.
+    #[serde(default)]
+    pub elapsed_ms: i64,
+    /// Time left on this root at the rate files went in so far; `None` until there is a rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eta_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

@@ -193,8 +193,28 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
     // the running scan, for Stop (from the start response, or from progress if it began elsewhere)
     let job = RwSignal::new(None::<String>);
     let stopping = RwSignal::new(false);
+    // The scan's start and expected finish on this machine's clock (the server sends durations),
+    // and a clock that ticks while it runs so elapsed and left count without new events.
+    let started_at = RwSignal::new(None::<f64>);
+    let finish_at = RwSignal::new(None::<f64>);
+    let now = RwSignal::new(js_sys::Date::now());
+    {
+        let iv = send_wrapper::SendWrapper::new(gloo_timers::callback::Interval::new(1_000, move || {
+            if scanning.get_untracked() {
+                now.set(js_sys::Date::now());
+            }
+        }));
+        on_cleanup(move || drop(iv));
+    }
 
     use_topic::<ScanProgress>("library.scan.progress", move |p| {
+        let t = js_sys::Date::now();
+        // a scan begun elsewhere (or before a reload) takes its start from the server
+        if started_at.get_untracked().is_none() || job.get_untracked().as_deref() != Some(p.job_id.as_str()) {
+            started_at.set(Some(t - p.elapsed_ms as f64));
+        }
+        finish_at.set(p.eta_ms.map(|e| t + e as f64));
+        now.set(t);
         scanning.set(true);
         job.set(Some(p.job_id.clone()));
         progress.set(Some(p));
@@ -211,6 +231,8 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
             let _ = progress.try_set(None);
             let _ = job.try_set(None);
             let _ = stopping.try_set(false);
+            let _ = started_at.try_set(None);
+            let _ = finish_at.try_set(None);
             reload_roots();
             match status.map(|s| logic::scan_outcome(&s.results, cancelled || s.state == "cancelled")) {
                 Some(logic::ScanOutcome::Empty { seen }) => {
@@ -230,6 +252,10 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
     let scan = move |root: Option<i64>| {
         scanning.set(true);
         note.set(None);
+        let t = js_sys::Date::now();
+        started_at.set(Some(t));
+        finish_at.set(None);
+        now.set(t);
         let url = match root {
             Some(id) => format!("/library/scan?root_id={id}"),
             None => "/library/scan".to_string(),
@@ -324,6 +350,7 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
                             </span>
                         </div>
                         <Meter value=value label="Scan progress" />
+                        <ScanTimes started_at=started_at finish_at=finish_at now=now />
                     </div>
                 }
             })}
@@ -355,6 +382,38 @@ fn FolderWay(roots: Vec<RootOut>, on_filled: Callback<()>) -> impl IntoView {
             {move || error.get().map(|e| view! { <p class="sys-notice danger" role="alert"><Icon name="alert" />{e}</p> })}
             <p class="faint hm-wel-fine">"Paths are on the machine running bc; "<code class="mono">"~"</code>" is its home folder. Watch folders and rescans live in "<a class="lib-link" href="/settings?tab=library">"Settings \u{203a} Library"</a>"."</p>
         </div>
+    }
+}
+
+/// Started, elapsed, left and finish time of the running scan.
+#[component]
+fn ScanTimes(started_at: RwSignal<Option<f64>>, finish_at: RwSignal<Option<f64>>, now: RwSignal<f64>) -> impl IntoView {
+    let clock = |ms: f64| {
+        let d = js_sys::Date::new(&ms.into());
+        let today = js_sys::Date::new_0().to_date_string() == d.to_date_string();
+        logic::scan_clock(d.get_hours(), d.get_minutes(), (!today).then(|| d.get_day()))
+    };
+    move || {
+        let start = started_at.get()?;
+        let t = now.get();
+        let left = match finish_at.get() {
+            Some(f) => {
+                let left = (f - t).max(0.0);
+                view! {
+                    <span>{format!("{} left", logic::scan_span(left))}</span>
+                    <span title="Expected finish, at the pace so far">{format!("Done around {}", clock(t + left))}</span>
+                }
+                .into_any()
+            }
+            None => view! { <span>"Estimating time left\u{2026}"</span> }.into_any(),
+        };
+        Some(view! {
+            <div class="hm-wel-scan-times faint">
+                <span>{format!("Started {}", clock(start))}</span>
+                <span class="mono">{format!("{} elapsed", logic::scan_span(t - start))}</span>
+                {left}
+            </div>
+        })
     }
 }
 
