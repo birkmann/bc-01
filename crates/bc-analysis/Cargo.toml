@@ -1,6 +1,6 @@
 [package]
 name = "bc-analysis"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "Streaming single-pass analysis: BS.1770 loudness, waveform, tempo/beats/downbeats/phrases, key, energy; pool + runner + HTTP router"
 
