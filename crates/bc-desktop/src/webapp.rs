@@ -6,9 +6,10 @@
 //! (`PWA.install`), and the window is then opened with `--app-id`.
 //!
 //! Chromium starts every app with the overlay off (the chevron in the title strip toggles it, and
-//! there is no switch or DevTools call for it), so once after installing, bc turns it on in the
-//! profile's web app database: field 34 of the app's record, `window_controls_overlay_enabled`.
-//! Only once, so folding the strip back down with the chevron sticks.
+//! there is no switch or DevTools call for it, nor a way to hide the chevron), so before every
+//! launch bc turns it on in the profile's web app database: field 34 of the app's record,
+//! `window_controls_overlay_enabled`. bc has one header layout; folding the strip back down with
+//! the chevron lasts only until the next launch.
 //!
 //! The app id is Chromium's own hash, recorded as the one new directory under
 //! `Web Applications/Manifest Resources` after the install. `bc-webapp.json` in the profile keeps
@@ -60,23 +61,6 @@ fn record(profile: &Path, origin: &str, browser: &Path, app_id: Option<&str>) {
     let _ = std::fs::write(profile.join(MARKER), v.to_string());
 }
 
-fn overlay_preset(profile: &Path) -> bool {
-    std::fs::read_to_string(profile.join(MARKER))
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("overlay")?.as_bool())
-        == Some(true)
-}
-
-fn record_overlay_preset(profile: &Path) {
-    let path = profile.join(MARKER);
-    let Some(mut v) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) else {
-        return;
-    };
-    v["overlay"] = true.into();
-    let _ = std::fs::write(path, v.to_string());
-}
-
 /// A browser runs on the profile. `SingletonLock` is a symlink to "host-pid" that dangles, so
 /// `exists()` (which follows it) would say no.
 fn in_use(profile: &Path) -> bool {
@@ -84,19 +68,18 @@ fn in_use(profile: &Path) -> bool {
 }
 
 /// The app id to open the window with (`--app-id`), installing bc first when it is not yet.
-/// Installs, and turns the overlay on, only while no browser runs on the profile.
+/// Installs, and turns the overlay (back) on, only while no browser runs on the profile.
 pub(crate) fn app_id(browser: &Path, profile: &Path, origin: &str) -> Option<String> {
     let id = match recorded(profile, origin, browser) {
         Some(r) => r?,
         None if in_use(profile) => return None,
         None => installed(browser, profile, origin)?,
     };
-    if !overlay_preset(profile) && !in_use(profile) {
+    if !in_use(profile) {
         match enable_overlay(profile, &id) {
-            Ok(()) => tracing::info!(app_id = %id, "turned on the window controls overlay: bc's header is the title bar"),
+            Ok(()) => tracing::debug!(app_id = %id, "turned on the window controls overlay: bc's header is the title bar"),
             Err(e) => tracing::warn!("could not turn on the window controls overlay ({e}); the title strip's chevron does it"),
         }
-        record_overlay_preset(profile);
     }
     Some(id)
 }
@@ -298,11 +281,6 @@ mod tests {
         let mut db = rusty_leveldb::DB::open(&dir, rusty_leveldb::Options::default()).unwrap();
         assert_eq!(db.get(b"web_apps-dt-abc").unwrap().as_ref(), [0x12, 2, b'b', b'c', 0x90, 0x02, 1]);
         assert!(enable_overlay(&p, "missing").is_err());
-
-        record(&p, "http://127.0.0.1:8420", Path::new("/usr/bin/chromium"), Some("abc"));
-        assert!(!overlay_preset(&p));
-        record_overlay_preset(&p);
-        assert!(overlay_preset(&p));
         let _ = std::fs::remove_dir_all(&p);
     }
 }

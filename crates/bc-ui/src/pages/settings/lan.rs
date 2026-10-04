@@ -7,7 +7,7 @@ use serde::Deserialize;
 use super::common::SysCard;
 use crate::api;
 use crate::data::{QuerySpec, use_query};
-use super::common::{QueryError, qh};
+use super::common::{Notice, QueryError, qh};
 use crate::ds::{Badge, Button, EmptyState, Icon, Skeleton, StatusBadge, Tone, Variant, confirm, toast_err, toast_ok};
 use crate::util::{copy_text, enc};
 
@@ -118,9 +118,76 @@ fn EnableLan(done: Callback<()>) -> impl IntoView {
 fn RemoteNote(authenticated: bool) -> impl IntoView {
     view! {
         <SysCard title="Pairing" icon="qr">
-            <EmptyState icon="lock" title="Pairing is managed on the host machine"
-                hint={if authenticated { "This device is paired. Open Settings on the computer running bc to pair more devices or revoke access." } else { "Open Settings on the computer running bc to create a pairing code." }} />
+            {if authenticated {
+                view! { <EmptyState icon="lock" title="Pairing is managed on the host machine"
+                    hint="This device is paired. Open Settings on the computer running bc to pair more devices or revoke access." /> }.into_any()
+            } else {
+                view! { <PairForm /> }.into_any()
+            }}
         </SysCard>
+    }
+}
+
+/// Typed-in code, for when the QR link was not used.
+#[component]
+fn PairForm() -> impl IntoView {
+    let code = RwSignal::new(String::new());
+    let busy = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+    let submit = move || {
+        let c = code.get_untracked();
+        if c.trim().is_empty() || busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match redeem(&c).await {
+                // The token cookie is set now; reload so every view refetches as a paired device.
+                Ok(()) => {
+                    let _ = crate::util::window().location().reload();
+                }
+                Err(e) => {
+                    error.set(Some(e.detail.clone().unwrap_or_else(|| e.message())));
+                    busy.set(false);
+                }
+            }
+        });
+    };
+    view! {
+        <p class="sys-hint">"On the computer running bc, open Settings > LAN and create a pairing code. Scan its QR code with this device, or type the code here."</p>
+        <div class="add-root">
+            <input class="input mono grow" placeholder="ABCD-EFGH" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Pairing code"
+                prop:value=move || code.get() on:input=move |ev| code.set(event_target_value(&ev))
+                on:keydown=move |ev| if ev.key() == "Enter" { submit() } />
+            <Button variant=Variant::Primary icon="link" busy=busy disabled=Signal::derive(move || code.get().trim().is_empty()) on_click=move |_| submit()>"Pair"</Button>
+        </div>
+        <Notice text=error />
+    }
+}
+
+/// The code of a pairing link (`?pair=CODE`, the address in the host's QR code).
+pub fn link_code() -> Option<String> {
+    let search = crate::util::window().location().search().ok()?;
+    let code = web_sys::UrlSearchParams::new_with_str(&search).ok()?.get("pair")?;
+    (!code.trim().is_empty()).then_some(code)
+}
+
+/// Redeems a pairing code. The server answers with the device token as an HttpOnly cookie,
+/// which every later request (fetch, WebSocket, audio) then carries on its own.
+pub async fn redeem(code: &str) -> api::ApiResult<()> {
+    api::call_json("POST", "/auth/pair", &serde_json::json!({ "code": code.trim(), "name": device_name() })).await
+}
+
+/// "Chrome on Android" and the like, for the host's device list.
+fn device_name() -> String {
+    let ua = crate::util::window().navigator().user_agent().unwrap_or_default();
+    let pick = |table: &[(&str, &'static str)]| table.iter().find(|(k, _)| ua.contains(k)).map(|(_, v)| *v);
+    let os = pick(&[("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"), ("Windows", "Windows"), ("Mac OS", "Mac"), ("Linux", "Linux")]);
+    let browser = pick(&[("Firefox", "Firefox"), ("Edg/", "Edge"), ("Chrome", "Chrome"), ("Safari", "Safari")]);
+    match (browser, os) {
+        (Some(b), Some(o)) => format!("{b} on {o}"),
+        (b, o) => b.or(o).unwrap_or("device").to_string(),
     }
 }
 

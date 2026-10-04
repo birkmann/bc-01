@@ -126,10 +126,6 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
   .topbar .search .input-wrap > .icon { left: 14px; width: 18px; height: 18px; }
   .topbar .search .input-wrap > .clear { right: 6px; }
 }
-/* Installed app with the title strip shown: the browser already draws the icon and name there, so
-   the header's lockup steps aside (keeping its width, so the divider still continues the sidebar). */
-@media (display-mode: standalone) { .topbar .hb-brand .brand { visibility: hidden; } }
-@media (display-mode: standalone) and (max-width: 1023px) { .topbar .hb-brand { display: none; } }
 /* Desktop app with the title strip folded away (Window Controls Overlay): the header is the title
    bar. It drags the window, its controls stay clickable, and it keeps clear of the browser's window
    buttons, which sit in whatever part of the top edge the titlebar area leaves out. The strip is too

@@ -13,7 +13,7 @@ mod audio;
 mod bandcamp;
 mod common;
 mod import;
-mod lan;
+pub(crate) mod lan;
 mod library;
 pub(crate) mod logic;
 mod prefs;

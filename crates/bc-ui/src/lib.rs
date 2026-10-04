@@ -21,7 +21,29 @@ pub mod widgets;
 /// Entry point called by `main` (and by trunk's generated glue).
 pub fn mount() {
     install_panic_overlay();
-    leptos::mount::mount_to_body(app::App);
+    let Some(code) = pages::settings::lan::link_code() else {
+        leptos::mount::mount_to_body(app::App);
+        return;
+    };
+    // A pairing link (the host's QR code): redeem it before anything else talks to the API.
+    wasm_bindgen_futures::spawn_local(async move {
+        let res = pages::settings::lan::redeem(&code).await;
+        let loc = util::window().location();
+        let clean = format!("{}{}", loc.pathname().unwrap_or_default(), loc.hash().unwrap_or_default());
+        match res {
+            // The token cookie is set: a fresh load without the code comes up paired.
+            Ok(()) => {
+                let _ = loc.replace(&clean);
+            }
+            Err(e) => {
+                if let Ok(h) = util::window().history() {
+                    let _ = h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&clean));
+                }
+                leptos::mount::mount_to_body(app::App);
+                ds::toast_err(&format!("Pairing failed: {}", e.detail.clone().unwrap_or_else(|| e.message())));
+            }
+        }
+    });
 }
 
 /// A wasm panic cannot be caught per route (no unwinding), so a panic shows a recoverable
