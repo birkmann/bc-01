@@ -1,6 +1,6 @@
 [package]
 name = "bc-meta"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 description = "Workstream 1: metadata write-back (preview, bulk write, undo)"
 

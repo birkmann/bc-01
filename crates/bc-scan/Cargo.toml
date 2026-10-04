@@ -1,6 +1,6 @@
 [package]
 name = "bc-scan"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 description = "Workstream 1: scanner, ingest, watcher, art pipeline, roots routes"
 

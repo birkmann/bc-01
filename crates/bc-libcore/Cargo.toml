@@ -1,6 +1,6 @@
 [package]
 name = "bc-libcore"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 description = "Workstream 1 shared base: Ctx, ApiError, library scope, row hydration, task host"
 
