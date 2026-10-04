@@ -205,7 +205,8 @@ fn Footer() -> impl IntoView {
                 <Button variant=Variant::Ghost size=crate::ds::Size::Sm
                     icon=dyn_icon(move || if theme.store.get().mode == bc_types::theme::Mode::Dark { "sun" } else { "moon" })
                     title="Toggle light / dark" on_click=move |_| theme.toggle_mode() />
-                <span class="spacer"></span>
+                // Every crate shares the workspace version and the UI ships inside the app binary.
+                <span class="sb-version sb-foot-text mono" title="bc version">{concat!("v", env!("CARGO_PKG_VERSION"))}</span>
                 <Button variant=Variant::Ghost size=crate::ds::Size::Sm icon="info" class="sbi-toggle"
                     pressed=Signal::derive(move || size.with(|s| s != "off"))
                     title="Library info: hidden / S / M / L" on_click=cycle />

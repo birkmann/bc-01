@@ -42,6 +42,7 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
 .sidebar.collapsed .sbi-toggle { display: none; }
 /* Library info widget (UiPrefs.sidebar_stats): quiet by design, figures stay muted. */
 .sb-foot .sbi-toggle { color: var(--color-ink-faint); }
+.sb-version { flex: 1; text-align: center; font-variant-numeric: tabular-nums; user-select: text; }
 .sb-foot .sbi-toggle[aria-pressed='true'] { color: var(--color-ink-muted); }
 .sbi { display: flex; flex-direction: column; gap: 6px; animation: fade-in var(--dur-base); }
 .sbi b { color: var(--color-ink-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
