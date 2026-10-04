@@ -98,11 +98,23 @@ struct HostEntry {
     missing: i64,
 }
 
+/// Whether an artist's name is spelled out in a host's subdomain: "Nina Kraviz" on
+/// `ninakraviz.bandcamp.com`, "DJ Dextro" on `djdextroofficial.bandcamp.com`. That is the
+/// artist's own page. An empty name proves nothing either way and counts as at home.
+fn named_in_host(host: &str, artist_fold: &str) -> bool {
+    let sub: String = host.trim_end_matches(".bandcamp.com").chars().filter(char::is_ascii_alphanumeric).collect();
+    let name: String = artist_fold.chars().filter(|c| c.is_alphanumeric()).collect();
+    name.is_empty() || sub.is_empty() || sub.contains(&name) || name.contains(&sub)
+}
+
 /// Hosts that look like label pages and still have unlabelled items.
 ///
 /// "Looks like a label page" is a property of the data itself: two or more distinct artists
-/// publishing on one host. A lone-artist host is that artist's own page -- self-released,
-/// correctly unlabelled -- and fetching it would be a request spent to learn nothing.
+/// publishing on one host, or one artist publishing on a host that is plainly not named after
+/// them (Sebo K on `rekids.bandcamp.com`) -- a library holding a single record off a label's
+/// page is the common case, not the exception. A lone artist on a host spelling out their own
+/// name is that artist's own page -- self-released, correctly unlabelled -- and fetching it
+/// would be a request spent to learn nothing.
 ///
 /// Both the inbox and the library's releases count as evidence, and both count as work left to
 /// do: a host is a candidate while any inbox item *or* any library release on it is still
@@ -146,7 +158,7 @@ pub fn find_candidates(c: &Connection) -> bc_db::Result<Vec<Candidate>> {
 
     Ok(by_host
         .into_iter()
-        .filter(|(_, e)| e.missing > 0 && e.artists.len() >= 2)
+        .filter(|(host, e)| e.missing > 0 && (e.artists.len() >= 2 || e.artists.iter().any(|(fold, _)| !named_in_host(host, fold))))
         .map(|(host, e)| Candidate { host, sample_urls: e.artists.into_iter().take(2).map(|(_, u)| u).collect() })
         .collect())
 }
@@ -210,6 +222,72 @@ pub fn file_host_releases(c: &Connection, host: &str, label_name: &str, label_ur
         count += 1;
     }
     Ok(count)
+}
+
+/// Re-credit releases on a proven label page that are bylined to the label itself.
+///
+/// Bandcamp shows a label's own uploads as "by <Label>" unless the label credits the album to
+/// an artist, so bandcamp-dl tags the album artist as the label while each track still names
+/// who made it. Such a release cannot be filed under its label (nothing files an artist as their
+/// own label) and sits on the shelf as the label's "artist". Where its tracks credit someone
+/// other than the label, the release takes that artist -- or "Various Artists" when the tracks
+/// name several. A release whose tracks only ever name the label is left alone: there is no
+/// evidence of anyone else.
+///
+/// The release identity `(artist, title, year)` stays unique: a twin already filed under the
+/// new artist keeps the old credit, for the folder-twin merge to settle.
+pub fn adopt_track_artists(c: &Connection, host: &str, label_name: &str) -> bc_db::Result<usize> {
+    let folded = label_name.trim().to_lowercase();
+    if folded.is_empty() {
+        return Ok(0);
+    }
+    let releases: Vec<(i64, String, String, Option<i64>)> = {
+        let mut st = c.prepare(
+            "SELECT r.id, coalesce(a.name, ''), r.title_key, r.year FROM releases r LEFT JOIN artists a ON a.id = r.artist_id \
+             WHERE r.bandcamp_url LIKE ?1",
+        )?;
+        st.query_map([format!("https://{host}/%")], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<std::result::Result<_, _>>()?
+    };
+    let mut count = 0;
+    for (rid, artist, title_key, year) in releases {
+        if !extract::artist_parts(&artist).contains(&folded) {
+            continue;
+        }
+        let credited: Vec<(i64, String)> = {
+            let mut st = c.prepare("SELECT DISTINCT a.id, a.name FROM tracks t JOIN artists a ON a.id = t.artist_id WHERE t.release_id = ?1")?;
+            st.query_map([rid], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<_, _>>()?
+        };
+        let others: Vec<i64> = credited.into_iter().filter(|(_, n)| !extract::artist_parts(n).contains(&folded)).map(|(id, _)| id).collect();
+        let artist_id = match others.as_slice() {
+            [] => continue,
+            [one] => *one,
+            _ => various_artists(c)?,
+        };
+        let twin: Option<i64> = c
+            .query_row(
+                "SELECT id FROM releases WHERE artist_id = ?1 AND title_key = ?2 AND year IS ?3 AND id != ?4",
+                params![artist_id, title_key, year, rid],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if twin.is_some() {
+            continue;
+        }
+        c.execute("UPDATE releases SET artist_id = ?2 WHERE id = ?1", params![rid, artist_id])?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn various_artists(c: &Connection) -> bc_db::Result<i64> {
+    const NAME: &str = "Various Artists";
+    let key = name_key(NAME);
+    if let Some(id) = c.query_row("SELECT id FROM artists WHERE name_key = ?1", [&key], |r| r.get(0)).optional()? {
+        return Ok(id);
+    }
+    c.execute("INSERT INTO artists(name, name_key, created_at) VALUES (?1, ?2, ?3)", params![NAME, key, bc_db::util::now_db()])?;
+    Ok(c.last_insert_rowid())
 }
 
 /// Give each label its own Bandcamp page, where the evidence is unambiguous.
@@ -604,7 +682,8 @@ impl LabelResolver {
         }
     }
 
-    async fn kick(&self) {
+    /// Start a resolution if any host is waiting for one, or queue one behind the running one.
+    pub async fn kick(&self) {
         if self.status().running {
             self.again.store(true, Ordering::SeqCst);
             return;
@@ -662,26 +741,30 @@ impl LabelResolver {
         let total = candidates.len() as i64;
         self.publish(|s| s.total = Some(total));
 
-        let (mut resolved, mut labelled, mut filed) = (0i64, 0i64, 0i64);
+        let (mut resolved, mut labelled, mut filed, mut fixed) = (0i64, 0i64, 0i64, 0i64);
         for (i, cand) in candidates.iter().enumerate() {
             if cancel.is_cancelled() {
                 return Ok(false);
             }
             if let Some((name, url, entries)) = label_from_page(&*src, cand).await {
                 let host = cand.host.clone();
-                let (l, f) = db
+                let (l, f, a) = db
                     .write_async(move |tx| {
                         let l = apply_label(tx, &host, &name)?;
+                        // Re-credit the label's own uploads first: filing skips a release whose
+                        // artist is the label.
+                        let a = adopt_track_artists(tx, &host, &name)?;
                         // The discography grid first -- it matches by URL *and* (artist, title) --
                         // then whatever else the library holds on that host, which the grid may
                         // have truncated.
                         let mut f = file_known_releases_under_label(tx, &name, Some(&url), &entries)?;
                         f += file_host_releases(tx, &host, &name, &url)?;
-                        Ok((l, f))
+                        Ok((l, f, a))
                     })
                     .await?;
                 labelled += l as i64;
                 filed += f as i64;
+                fixed += a as i64;
                 resolved += 1;
             } else if let Some(stated) = label_for(&*src, cand).await {
                 let host = cand.host.clone();
@@ -694,6 +777,7 @@ impl LabelResolver {
                 s.resolved = resolved;
                 s.labelled = labelled;
                 s.filed = filed;
+                s.artists_fixed = fixed;
             });
         }
 

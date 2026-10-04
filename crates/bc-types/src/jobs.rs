@@ -18,6 +18,7 @@ pub const KIND_HARVEST: &str = "harvest";
 pub const KIND_WALK: &str = "walk";
 pub const KIND_SWEEP: &str = "sweep";
 pub const KIND_ENRICH: &str = "enrich";
+pub const KIND_RELINK: &str = "relink";
 
 // -- job statuses --------------------------------------------------------------
 pub const JOB_QUEUED: &str = "queued";

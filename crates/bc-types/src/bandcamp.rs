@@ -15,6 +15,7 @@ pub const TOPIC_HARVEST_COMPLETED: &str = "harvest.completed";
 pub const TOPIC_HARVEST_PROGRESS: &str = "harvest.progress";
 pub const TOPIC_HARVEST_ENRICH: &str = "harvest.enrich";
 pub const TOPIC_HARVEST_LABELS: &str = "harvest.labels";
+pub const TOPIC_HARVEST_RELINK: &str = "harvest.relink";
 pub const TOPIC_LABELS_SWEEP: &str = "labels.sweep";
 pub const TOPIC_FAVORITES_SWEEP: &str = "favorites.sweep";
 pub const TOPIC_FEED_SWEEP: &str = "feed.sweep";
@@ -289,6 +290,30 @@ pub struct LabelResolveStatus {
     pub resolved: i64,
     pub labelled: i64,
     pub filed: i64,
+    /// Releases whose artist was the label itself, re-credited to the artist on their tracks.
+    #[serde(default)]
+    pub artists_fixed: i64,
+    pub error: Option<String>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+/// `GET/POST/DELETE /harvest/relink` and `harvest.relink` event: finding each release's
+/// Bandcamp page again by search.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct RelinkStatus {
+    /// idle | running | done | failed
+    pub phase: String,
+    pub running: bool,
+    /// Releases searched so far this run.
+    pub seen: i64,
+    /// Releases this run set out to search.
+    pub total: i64,
+    /// Releases that got their Bandcamp page back.
+    pub linked: i64,
+    /// Releases without a confident match (left as they were).
+    pub unmatched: i64,
+    pub current: Option<String>,
     pub error: Option<String>,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,

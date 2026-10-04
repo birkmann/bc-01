@@ -157,7 +157,7 @@ async fn the_hosts_own_page_settles_it_and_files_the_library() {
     // The label putting out a record under its own name is not "on a label" -- an artist is
     // never filed as their own label.
     let own = app.release("Children Of Tomorrow Records", "Sampler", Some(&format!("{COT}/album/sampler")));
-    let elsewhere = app.release("Someone", "Else", Some("https://other.bandcamp.com/album/x"));
+    let elsewhere = app.release("Someone", "Else", Some("https://someone.bandcamp.com/album/x"));
     let src = pages(vec![(
         format!("{COT}/music"),
         label_page(
@@ -481,4 +481,67 @@ async fn backfill_names_labels_on_past_label_page_harvests() {
     assert_eq!(app.label_url(label).as_deref(), Some("https://ostgut.bandcamp.com"));
     // Idempotent.
     assert_eq!(app.exec(|t| backfill_harvest_label_names(t)), 0);
+}
+
+// -- one record off a label page --------------------------------------------------------
+
+/// A library holding a single record off a label's page is the common case: one artist on a host
+/// named for somebody else is worth asking. On their own page they are not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lone_artist_on_someone_elses_host_is_a_candidate() {
+    let app = app().await;
+    app.release("Sebo K", "Patience", Some("https://rekids.bandcamp.com/album/patience"));
+    app.release("Nina Kraviz", "Ghetto Kraviz", Some("https://ninakraviz.bandcamp.com/album/ghetto-kraviz"));
+    app.release("Dj Dextro", "Monism EP", Some("https://djdextroofficial.bandcamp.com/album/monism-ep"));
+
+    let hosts: Vec<String> = app.q(find_candidates).into_iter().map(|c| c.host).collect();
+    assert_eq!(hosts, vec!["rekids.bandcamp.com".to_string()]);
+}
+
+fn track_by(app: &App, release: i64, artist: &str, title: &str) {
+    let artist_id = app.artist(artist, None);
+    let title = title.to_string();
+    app.exec(move |t| {
+        t.execute(
+            "INSERT INTO tracks(release_id, artist_id, title, title_key, loved, play_count, skip_count, added_at) \
+             VALUES (?1, ?2, ?3, ?3, 0, 0, 0, datetime('now'))",
+            bc_db::rusqlite::params![release, artist_id, title],
+        )?;
+        Ok(())
+    });
+}
+
+fn artist_of(app: &App, release: i64) -> String {
+    app.q(move |c| Ok(c.query_row("SELECT a.name FROM releases r JOIN artists a ON a.id = r.artist_id WHERE r.id = ?1", [release], |r| r.get(0))?))
+}
+
+/// A label's own upload is bylined to the label; its tracks say who made it. On a proven label
+/// page the release takes the track artist (or Various Artists) and is then filed under the label.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_release_bylined_to_its_label_takes_the_artist_on_its_tracks() {
+    let app = app().await;
+    const YORE: &str = "https://yorerecords.bandcamp.com";
+    let one = app.release("Yore Records", "Oliver Hacke - Midatlantic EP", Some(&format!("{YORE}/album/midatlantic")));
+    track_by(&app, one, "Oliver Hacke", "Midatlantic");
+    track_by(&app, one, "Yore Records", "Outro");
+    let many = app.release("Yore Records", "Yore Selection 2022", Some(&format!("{YORE}/album/selection")));
+    track_by(&app, many, "Clive From Accounts", "A");
+    track_by(&app, many, "Steve Mill", "B");
+    // Nobody but the label anywhere: no evidence of anyone else, left as it is.
+    let bare = app.release("Yore Records", "Yore Tools", Some(&format!("{YORE}/album/tools")));
+    track_by(&app, bare, "Yore Records", "Tool 1");
+    app.release("Niko Marks", "Density", Some(&format!("{YORE}/album/density")));
+    let src = pages(vec![(format!("{YORE}/music"), label_page("Yore Records", &[]))]);
+
+    let state = resolve(&app, src).await;
+
+    assert_eq!(state.phase, "done", "{:?}", state.error);
+    assert_eq!(state.artists_fixed, 2);
+    assert_eq!(artist_of(&app, one), "Oliver Hacke");
+    assert_eq!(artist_of(&app, many), "Various Artists");
+    assert_eq!(artist_of(&app, bare), "Yore Records");
+    let label_id: i64 = app.q(|c| Ok(c.query_row("SELECT id FROM labels WHERE name = 'Yore Records'", [], |r| r.get(0))?));
+    assert_eq!(app.release_label_id(one), Some(label_id));
+    assert_eq!(app.release_label_id(many), Some(label_id));
+    assert_eq!(app.release_label_id(bare), None, "still never an artist filed as their own label");
 }

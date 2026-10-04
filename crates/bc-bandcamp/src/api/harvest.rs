@@ -17,7 +17,7 @@ use bc_db::util::name_key;
 use bc_jobs::ApiError;
 use bc_types::bandcamp::{
     CacheHealth, CookieRequest, EnrichRequest, EnrichState, HarvestHealth, HarvestItemOut, HarvestItemsQuery, IdentityStatus,
-    LabelResolveStatus, LabelSweepRequest, LocateOut, QueueRequest, QueueResult, RateLimitHealth, ResolveRequest, ResolveResult, RunRequest,
+    LabelResolveStatus, LabelSweepRequest, LocateOut, QueueRequest, QueueResult, RateLimitHealth, RelinkStatus, ResolveRequest, ResolveResult, RunRequest,
     RunResult, SweepStatus, TagCount, TOPIC_LIBRARY_CHANGED,
 };
 use bc_types::{Accepted, Page};
@@ -28,6 +28,7 @@ use crate::harvest::artists::locate_artist_page;
 use crate::harvest::enrich::TagEnricher;
 use crate::harvest::inbox::{self, HarvestRow, QueueOpts, ROW_COLS};
 use crate::harvest::labels::{LabelResolver, LocateResult, locate_label_page};
+use crate::harvest::relink::Relinker;
 use crate::harvest::runs::{RunLookup, RunService};
 use crate::harvest::sweep::{SweepKind, SweepService, Sweeper};
 use crate::identity;
@@ -52,6 +53,7 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
         .route("/harvest/enrich", get(enrich_status).post(start_enrich).delete(stop_enrich))
         .route("/harvest/labels", get(get_label_resolution))
         .route("/harvest/labels/resolve", post(start_label_resolution))
+        .route("/harvest/relink", get(relink_status).post(start_relink).delete(stop_relink))
         .route("/harvest/labels/sweep", get(get_label_sweep).post(start_label_sweep).delete(stop_label_sweep))
         .route("/harvest/favorites/sweep", get(get_favorites_sweep).post(start_favorites_sweep).delete(stop_favorites_sweep))
         .route("/harvest/identity", get(get_identity).put(put_identity).delete(delete_identity))
@@ -550,6 +552,22 @@ async fn get_label_resolution(State(ctx): State<Arc<Ctx>>) -> Json<LabelResolveS
 async fn start_label_resolution(State(ctx): State<Arc<Ctx>>) -> ApiResult<(StatusCode, Json<LabelResolveStatus>)> {
     let s = ctx.expect::<LabelResolver>().start_run().await?;
     Ok((StatusCode::ACCEPTED, Json(s)))
+}
+
+async fn relink_status(State(ctx): State<Arc<Ctx>>) -> Json<RelinkStatus> {
+    Json(ctx.expect::<Relinker>().status())
+}
+
+/// Search Bandcamp for every release without its page (`202`, job kind `relink`); resumes after
+/// the releases an earlier run already searched.
+async fn start_relink(State(ctx): State<Arc<Ctx>>) -> ApiResult<(StatusCode, Json<RelinkStatus>)> {
+    let s = ctx.expect::<Relinker>().start_run().await?;
+    Ok((StatusCode::ACCEPTED, Json(s)))
+}
+
+/// Stops the walk, keeping every link made so far. Idle is not an error.
+async fn stop_relink(State(ctx): State<Arc<Ctx>>) -> Json<RelinkStatus> {
+    Json(ctx.expect::<Relinker>().stop().await)
 }
 
 fn sweeper(ctx: &Ctx, kind: SweepKind) -> Arc<Sweeper> {

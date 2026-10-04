@@ -1,8 +1,9 @@
 //! Background jobs of the label shelf as live state: the label sweep ("find & download new"),
-//! the label resolver ("find missing labels") and the stray-release merge. Each is one status
+//! the label resolver ("find missing labels"), the relink ("link library to Bandcamp") and the
+//! stray-release merge. Each is one status
 //! value fetched once and then patched in place from its WebSocket topic; polling is only a
 //! fallback while the socket is down.
-use bc_types::bandcamp::{LabelResolveStatus, SweepStatus};
+use bc_types::bandcamp::{LabelResolveStatus, RelinkStatus, SweepStatus};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -162,6 +163,63 @@ impl JobState<LabelResolveStatus> {
             st.with(|s| {
                 let s = s.as_ref()?;
                 if s.running || (report.get() && (s.phase == "done" || s.phase == "failed")) { lg::resolve_text(s) } else { None }
+            })
+        })
+    }
+
+    pub fn dismiss(&self) {
+        self.report.set(false);
+        self.error.set(None);
+    }
+}
+
+pub fn use_relink(on_finished: Callback<()>) -> JobState<RelinkStatus> {
+    job_state::<RelinkStatus>(bc_types::bandcamp::TOPIC_HARVEST_RELINK, "/harvest/relink", |s| s.running, on_finished)
+}
+
+impl JobState<RelinkStatus> {
+    pub fn running(&self) -> Signal<bool> {
+        let st = self.status;
+        Signal::derive(move || st.with(|s| s.as_ref().map(|s| s.running).unwrap_or(false)))
+    }
+
+    pub fn start(&self) {
+        let me = *self;
+        me.starting.set(true);
+        me.error.set(None);
+        spawn_local(async move {
+            let r = api::post::<_, RelinkStatus>("/harvest/relink", &serde_json::json!({})).await;
+            let _ = me.starting.try_set(false);
+            match r {
+                Ok(s) => {
+                    let _ = me.status.try_set(Some(s));
+                    let _ = me.report.try_set(false);
+                }
+                Err(e) => {
+                    let _ = me.error.try_set(Some(e.message()));
+                }
+            }
+        });
+    }
+
+    pub fn stop(&self) {
+        let me = *self;
+        spawn_local(async move {
+            if let Ok(s) = api::send::<_, RelinkStatus>("DELETE", "/harvest/relink", &serde_json::json!({})).await {
+                let _ = me.status.try_set(Some(s));
+            }
+        });
+    }
+
+    pub fn line(&self) -> Signal<Option<(Tone, String)>> {
+        let (st, report, err) = (self.status, self.report, self.error);
+        Signal::derive(move || {
+            if let Some(e) = err.get() {
+                return Some((Tone::Err, e));
+            }
+            st.with(|s| {
+                let s = s.as_ref()?;
+                if s.running || (report.get() && (s.phase == "done" || s.phase == "failed")) { lg::relink_text(s) } else { None }
             })
         })
     }

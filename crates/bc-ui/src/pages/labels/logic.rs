@@ -221,9 +221,47 @@ pub fn resolve_text(s: &bc_types::bandcamp::LabelResolveStatus) -> Option<(Tone,
         "failed" => Some((Tone::Err, format!("Finding labels failed: {}", s.error.clone().unwrap_or_else(|| "unknown error".into())))),
         "done" if s.resolved > 0 => Some((
             Tone::Ok,
-            format!("Found {} and filed {} under {}.", count_of(s.resolved, "label"), count_of(s.filed, "release"), if s.resolved == 1 { "it" } else { "them" }),
+            format!(
+                "Found {} and filed {} under {}.{}",
+                count_of(s.resolved, "label"),
+                count_of(s.filed, "release"),
+                if s.resolved == 1 { "it" } else { "them" },
+                if s.artists_fixed > 0 { format!(" {} credited to their artist instead of the label.", count_of(s.artists_fixed, "release")) } else { String::new() }
+            ),
         )),
         "done" => Some((Tone::Ok, format!("Checked {}: nothing new to file.", count_of(s.total.unwrap_or(0), "Bandcamp page")))),
+        _ => None,
+    }
+}
+
+/// Banner copy for "Link library to Bandcamp".
+pub fn relink_text(s: &bc_types::bandcamp::RelinkStatus) -> Option<(Tone, String)> {
+    if s.running {
+        let now = s.current.as_deref().map(|c| format!(" \u{2014} {c}")).unwrap_or_default();
+        return Some((
+            Tone::Ok,
+            format!(
+                "Finding releases on Bandcamp: {} of {} searched, {} linked{now}",
+                format_count(s.seen),
+                format_count(s.total),
+                format_count(s.linked)
+            ),
+        ));
+    }
+    match s.phase.as_str() {
+        "failed" => Some((Tone::Err, format!("Linking to Bandcamp failed: {}", s.error.clone().unwrap_or_else(|| "unknown error".into())))),
+        "done" if s.total == 0 => Some((Tone::Ok, "Every release has already been looked up on Bandcamp.".to_string())),
+        "done" => Some((
+            Tone::Ok,
+            format!(
+                "{} {} of {}: linked {}, {} without a sure match. Labels are filed from the linked pages.",
+                if s.error.is_some() { "Stopped after" } else { "Searched" },
+                format_count(s.seen),
+                format_count(s.total),
+                count_of(s.linked, "release"),
+                format_count(s.unmatched)
+            ),
+        )),
         _ => None,
     }
 }

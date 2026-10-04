@@ -117,8 +117,12 @@ pub fn LabelsPage() -> impl IntoView {
         crate::data::invalidate_entity("label", &[]);
         crate::data::invalidate_entity("release", &[]);
     }));
+    let relink = sweep::use_relink(Callback::new(|_| {
+        crate::data::invalidate_entity("label", &[]);
+        crate::data::invalidate_entity("release", &[]);
+    }));
     let actions = Actions::new(Callback::new(|_| crate::data::invalidate_entity("label", &[])));
-    
+
     let fetcher: PageFetcher<LabelRow> = Arc::new(move |req| {
         let url = shelf_url(&q.get_untracked(), &sort.get_untracked(), Some(req.offset), req.limit);
         let offset = req.offset;
@@ -196,6 +200,7 @@ pub fn LabelsPage() -> impl IntoView {
     let n_picked = Signal::derive(move || picked.with(|p| p.len()));
     let sweep_running = sweep.running();
     let resolve_running = resolve.running();
+    let relink_running = relink.running();
     let sweep_busy = Signal::derive(move || sweep_running.get() || sweep.starting.get());
     let sweep_label = Signal::derive(move || {
         let n = n_picked.get();
@@ -204,7 +209,10 @@ pub fn LabelsPage() -> impl IntoView {
     let sort_options = Signal::derive(|| lg::LABEL_SORTS.iter().map(|s| SelectOption::new(s.value, s.label)).collect::<Vec<_>>());
 
     let overflow = Callback::new(move |_| -> Vec<MenuEntry> {
-        vec![MenuItem::new("Find missing labels").icon("tag").disabled(resolve_running.get_untracked()).on(move || resolve.start()).into()]
+        vec![
+            MenuItem::new("Find missing labels").icon("tag").disabled(resolve_running.get_untracked()).on(move || resolve.start()).into(),
+            MenuItem::new("Link library to Bandcamp").icon("link").disabled(relink_running.get_untracked()).on(move || relink.start()).into(),
+        ]
     });
     let start_sweep = move |_| {
         let ids: Vec<i64> = picked.get_untracked().into_iter().collect();
@@ -219,6 +227,7 @@ pub fn LabelsPage() -> impl IntoView {
     });
     let sweep_line = sweep.line();
     let resolve_line = resolve.line();
+    let relink_line = relink.line();
 
     view! {
         <div class="page pp-page">
@@ -262,6 +271,7 @@ pub fn LabelsPage() -> impl IntoView {
                         }))}
                     }) />
                 <StatusBar line=resolve_line running=resolve_running on_dismiss=Callback::new(move |_| resolve.dismiss()) />
+                <StatusBar line=relink_line running=relink_running on_stop=Callback::new(move |_| relink.stop()) on_dismiss=Callback::new(move |_| relink.dismiss()) />
                 <NoticeBar notice=actions.notice busy=actions.busy() on_download=Callback::new(move |ids| actions.queue(ids)) />
             </div>
             <div class="pp-fill">

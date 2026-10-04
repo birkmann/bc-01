@@ -1,5 +1,5 @@
 //! Harvest services (inbox, fan walker, feed sweeper, label/favourites sweeps, tag enricher,
-//! label resolver, artist/label locate). Each submodule exposes
+//! label resolver, relink, artist/label locate). Each submodule exposes
 //! `pub fn init(ctx: &Arc<Ctx>)` (construct + `ctx.put`) and `pub async fn start(ctx: &Arc<Ctx>)`
 //! (spawn background workers); this file fans out to them.
 
@@ -13,12 +13,14 @@ pub mod fans;
 pub mod feed;
 pub mod inbox;
 pub mod labels;
+pub mod relink;
 pub mod runs;
 pub mod sweep;
 
 pub fn init(ctx: &Arc<Ctx>) {
     inbox::init(ctx);
     labels::init(ctx);
+    relink::init(ctx);
     sweep::init(ctx);
     runs::init(ctx);
     enrich::init(ctx);
@@ -30,6 +32,7 @@ pub fn init(ctx: &Arc<Ctx>) {
 pub async fn start(ctx: &Arc<Ctx>) {
     inbox::start(ctx).await;
     labels::start(ctx).await;
+    relink::start(ctx).await;
     sweep::start(ctx).await;
     runs::start(ctx).await;
     enrich::start(ctx).await;
