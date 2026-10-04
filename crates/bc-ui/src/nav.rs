@@ -45,6 +45,9 @@ pub const MORE: &[(&str, &[NavItem])] = &[
     ),
 ];
 
+/// The bottom tab bar on phones: the first primary routes; everything else sits behind "More".
+pub const TABS: &[NavItem] = PRIMARY.split_at(4).0;
+
 pub const SETTINGS: NavItem = NavItem { to: "/settings", label: "Settings", icon: "settings" };
 
 pub fn all() -> Vec<NavItem> {
@@ -62,6 +65,11 @@ pub fn is_active(to: &str, path: &str) -> bool {
         return path == "/";
     }
     path == to || path.starts_with(&format!("{to}/"))
+}
+
+/// Whether `path` belongs to one of the tab bar's routes (otherwise "More" is the active tab).
+pub fn in_tabs(path: &str) -> bool {
+    TABS.iter().any(|t| is_active(t.to, path))
 }
 
 #[cfg(test)]
@@ -82,5 +90,15 @@ mod tests {
         let n = v.len();
         v.dedup();
         assert_eq!(n, v.len());
+    }
+    #[test]
+    fn tabs_cover_primary_routes_only() {
+        assert_eq!(TABS.len(), 4);
+        assert!(TABS.iter().all(|t| PRIMARY.iter().any(|p| p.to == t.to)));
+        assert!(in_tabs("/"));
+        assert!(in_tabs("/albums/12"));
+        assert!(!in_tabs("/loved"));
+        assert!(!in_tabs("/settings"));
+        assert!(!in_tabs("/labels"));
     }
 }

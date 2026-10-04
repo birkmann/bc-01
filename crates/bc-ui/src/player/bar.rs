@@ -439,7 +439,7 @@ pub fn PlayerBar() -> impl IntoView {
                 <div class="pl-center">
                     <div class="pl-controls">
                         <Button variant=Variant::Ghost class="pl-opt" icon="shuffle" title="Shuffle" pressed=Signal::derive(move || st.with(|s| s.shuffle)) on_click=move |_| player.cmd(PlayerCommand::ToggleShuffle) />
-                        <Button variant=Variant::Ghost icon="skip-prev" title="Previous (Shift+Left)" on_click=move |_| player.previous() />
+                        <Button variant=Variant::Ghost class="pl-prev" icon="skip-prev" title="Previous (Shift+Left)" on_click=move |_| player.previous() />
                         <button class="pl-play" type="button" title=move || if playing.get() { "Pause (Space)" } else { "Play (Space)" }
                             aria-label=move || if playing.get() { "Pause" } else { "Play" } on:click=move |_| player.toggle()>
                             <Icon name=dyn_icon(move || if playing.get() { "pause" } else { "play" }) />

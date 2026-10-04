@@ -140,7 +140,7 @@ pub fn TopBar() -> impl IntoView {
             <Clock />
             <span class="hb-div"></span>
             <Button variant=Variant::Ghost icon="sparkles" title="Command palette (Ctrl+K)" on_click=move |_| app.palette_open.set(true) />
-            <a class="btn btn-ghost btn-icon" href="/settings" title="Settings" aria-label="Settings"><crate::ds::Icon name="sliders" /></a>
+            <a class="btn btn-ghost btn-icon hb-settings" href="/settings" title="Settings" aria-label="Settings"><crate::ds::Icon name="sliders" /></a>
             <ToastCentre />
         </header>
     }

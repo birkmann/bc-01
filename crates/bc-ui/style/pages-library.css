@@ -248,7 +248,7 @@
 .hm-refresh.fresh { border-color: var(--color-accent); color: var(--color-accent); }
 .hm-refresh:disabled .icon { animation: spin .8s linear infinite; }
 .hm-dot { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 0 2px var(--color-surface-1); animation: pulse-dot 1.8s ease-in-out infinite; }
-@media (pointer: coarse) { .hm-refresh { min-height: 40px; } }
+@media (pointer: coarse), (max-width: 720px) { .hm-refresh { min-height: 40px; } }
 
 .hm-crate { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 14px; }
 .hm-crate-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 16px; }

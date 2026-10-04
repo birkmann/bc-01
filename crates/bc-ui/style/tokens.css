@@ -80,8 +80,11 @@
   --player-h: 104px;
   --topbar-h: 48px;         /* panel / drawer heads */
   --header-h: 40px;         /* app header */
+  --tabbar-h: 0px;          /* mobile bottom tab bar (none on wider screens) */
   --accent-art: var(--color-accent); /* optional album-art accent override */
 }
+/* Phone-sized windows: a taller, touch-sized header and the bottom tab bar. */
+@media (max-width: 720px) { :root { --header-h: 56px; --tabbar-h: 56px; } }
 
 :root[data-theme='light'] {
   color-scheme: light;

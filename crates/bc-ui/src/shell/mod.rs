@@ -1,5 +1,7 @@
-//! App shell: full-width header, sidebar / rail / drawer, route host, right panels, player bar.
+//! App shell: full-width header, sidebar / rail / drawer, route host, right panels, player bar,
+//! and on phones a bottom tab bar.
 mod sidebar;
+mod tabbar;
 mod topbar;
 
 use leptos::prelude::*;
@@ -13,6 +15,7 @@ use crate::player::plan::PlanPanel;
 use crate::player::similar::SimilarPanel;
 use crate::widgets::{ColSize, Side, Splitter};
 pub use sidebar::{NavLinks, Sidebar};
+use tabbar::TabBar;
 pub use topbar::TopBar;
 
 const SIDEBAR: ColSize = ColSize { key: "bc:ui:sidebar-w", default: 232.0, min: 180.0, max: 400.0 };
@@ -85,6 +88,7 @@ pub fn Shell(children: Children) -> impl IntoView {
                 </aside>
             </div>
             <PlayerBar />
+            <TabBar />
         </div>
         <crate::palette::CommandPalette />
         <crate::player::deck::DeckView />
