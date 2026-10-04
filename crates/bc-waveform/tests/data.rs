@@ -503,6 +503,8 @@ mod store {
         let s = st.stats();
         assert_eq!(s.files, 3);
         assert!(s.bytes <= st.cap_bytes(), "{s:?}");
+        // evicted to the low-water mark, so the next put does not trigger another pass
+        assert!(s.bytes <= st.cap_bytes() / 1000 * 900, "{s:?}");
         assert!(!st.header(2).unwrap().has_detail());
         assert!(st.header(1).unwrap().has_detail());
         assert!(st.header(3).unwrap().has_detail());

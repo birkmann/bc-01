@@ -5,7 +5,7 @@
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, TryLockError};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
@@ -43,11 +43,17 @@ pub struct StoreStats {
     pub cap_bytes: u64,
 }
 
+/// Eviction stops at this share of the cap (per mille), so a cache sitting at the cap rescans its
+/// files once per ~10% of new data rather than on every put.
+const EVICT_TO_PERMILLE: u64 = 900;
+
 pub struct WaveformStore {
     dir: PathBuf,
     cap_bytes: u64,
-    /// Guards accounting and eviction. `None` = not scanned yet.
+    /// Guards accounting and file writes. `None` = not scanned yet.
     state: Mutex<Option<u64>>,
+    /// Held for a whole eviction pass: one at a time, without blocking puts.
+    evicting: Mutex<()>,
     tmp_counter: AtomicU64,
 }
 
@@ -57,6 +63,7 @@ impl WaveformStore {
             dir: dir.into(),
             cap_bytes,
             state: Mutex::new(None),
+            evicting: Mutex::new(()),
             tmp_counter: AtomicU64::new(0),
         }
     }
@@ -203,22 +210,34 @@ impl WaveformStore {
         }
     }
 
-    /// Rewrite least-recently-used files overview-only until the total fits the cap. Returns
+    /// When over the cap, rewrite least-recently-used files overview-only until the total is down
+    /// to [`EVICT_TO_PERMILLE`] of it. Returns
     /// the number of files downgraded. Files that are already overview-only are left alone.
     pub fn evict_to_cap(&self) -> io::Result<usize> {
-        let mut st = self.lock();
-        let mut files = self.scan();
-        let mut total: u64 = files.iter().map(|x| x.1).sum();
-        *st = Some(total);
+        let _pass = match self.evicting.try_lock() {
+            Ok(g) => g,
+            Err(TryLockError::Poisoned(e)) => e.into_inner(),
+            // another pass is running; puts made meanwhile are accounted and caught by the next one
+            Err(TryLockError::WouldBlock) => return Ok(0),
+        };
+        let (mut files, mut total) = {
+            let mut st = self.lock();
+            let files = self.scan();
+            let total: u64 = files.iter().map(|x| x.1).sum();
+            *st = Some(total);
+            (files, total)
+        };
         if total <= self.cap_bytes {
             return Ok(0);
         }
+        let target = self.cap_bytes / 1000 * EVICT_TO_PERMILLE;
         files.sort_by_key(|x| x.2);
         let mut downgraded = 0;
-        for (path, len, _) in files {
-            if total <= self.cap_bytes {
+        for (path, len, mtime) in files {
+            if total <= target {
                 break;
             }
+            // decode and re-encode outside the lock: puts keep flowing meanwhile
             let Ok(bytes) = fs::read(&path) else { continue };
             let Ok(h) = read_header(&bytes) else { continue };
             if !h.has_detail() {
@@ -228,21 +247,27 @@ impl WaveformStore {
                 continue;
             };
             let small = w.to_bytes(&EncodeOpts::file_overview_only());
-            let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
+            let mut st = self.lock();
+            // rewritten or read since the scan: no longer this LRU entry
+            if fs::metadata(&path).and_then(|m| m.modified()).ok() != Some(mtime) {
+                continue;
+            }
             self.write_atomic(&path, &small)?;
             // keep the LRU order stable for the rewritten file
-            if let (Some(t), Ok(f)) = (mtime, File::options().write(true).open(&path)) {
-                let _ = f.set_modified(t);
+            if let Ok(f) = File::options().write(true).open(&path) {
+                let _ = f.set_modified(mtime);
             }
+            let cur = self.total_locked(&mut st);
+            *st = Some(cur.saturating_sub(len) + small.len() as u64);
             total = total.saturating_sub(len) + small.len() as u64;
             downgraded += 1;
         }
-        *st = Some(total);
         Ok(downgraded)
     }
 
+    /// A snapshot; files are replaced by rename, so no lock is needed (and none is held while every
+    /// header is read).
     pub fn stats(&self) -> StoreStats {
-        let _g = self.lock();
         let files = self.scan();
         let mut s = StoreStats {
             cap_bytes: self.cap_bytes,
