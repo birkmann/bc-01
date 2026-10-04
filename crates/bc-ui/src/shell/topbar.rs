@@ -32,7 +32,7 @@ fn HistoryButton(dir: Dir) -> impl IntoView {
         _ => format!("{verb} ({keys})"),
     };
     view! {
-        <button type="button" class="btn btn-ghost btn-icon btn-sm" aria-label=verb title=title
+        <button type="button" class="btn btn-ghost btn-icon" aria-label=verb title=title
             disabled=move || label.get().is_none() on:click=move |_| history::go(dir)>
             <Icon name=icon />
         </button>
@@ -135,7 +135,10 @@ pub fn TopBar() -> impl IntoView {
                 <Led label="AN" state=busy(an) tip=count_tip(an, "analysis") />
             </div>
             <Show when=move || !owns_search.get() fallback=|| view! { <div class="search"></div> }>
-                <div class="search"><SearchInput value=text node_ref=input placeholder="Search tracks, artists, albums, tags..." /></div>
+                <div class="search">
+                    <SearchInput value=text node_ref=input placeholder="Search tracks, artists, albums, tags..." />
+                    <span class="kbd hb-search-key" aria-hidden="true">"/"</span>
+                </div>
             </Show>
             <Clock />
             <span class="hb-div"></span>

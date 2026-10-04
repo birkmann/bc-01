@@ -73,37 +73,51 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
 
 /* App header: one strip across the top (frame, header and sidebar share surface-0). The brand
    cell is as wide as the sidebar column so the divider after it continues the sidebar edge. */
-.topbar { display: flex; align-items: center; gap: 12px; height: var(--header-h); flex: none; padding: 0 8px 0 0; border-bottom: 1px solid var(--color-line-subtle); background: var(--color-surface-0); position: relative; z-index: 5; padding-top: env(safe-area-inset-top); box-sizing: content-box; }
-.topbar .search { flex: 1; max-width: 560px; margin: 0 auto; }
+.topbar { display: flex; align-items: center; gap: 16px; height: var(--header-h); flex: none; padding: 0 16px 0 0; border-bottom: 1px solid var(--color-line); background: var(--color-surface-0); position: relative; z-index: 5; padding-top: env(safe-area-inset-top); box-sizing: content-box; }
 .topbar .only-mobile { display: inline-flex; }
+.topbar .btn-icon { width: 36px; height: 36px; }
+.topbar .btn-icon svg { width: 18px; height: 18px; }
+.topbar .btn-ghost { color: var(--color-ink); }
 .topbar .btn-ghost:hover:not(:disabled) { background: var(--color-surface-3); }
+/* The library search is the header's centrepiece: tall, lifted off the strip, with the `/` hint. */
+.topbar .search { flex: 1; max-width: 640px; margin: 0 auto; position: relative; }
+.topbar .search .input { height: 40px; padding-left: 42px; padding-right: 40px; font-size: var(--text-base); background: var(--color-surface-3); border-color: var(--color-line); border-radius: var(--radius-lg); }
+.topbar .search .input::placeholder { color: var(--color-ink-muted); }
+.topbar .search .input::-webkit-search-cancel-button { display: none; }
+.topbar .search .input:hover { border-color: var(--color-line-strong); }
+.topbar .search .input:focus-visible { border-color: var(--color-accent); background: var(--color-surface-2); }
+.topbar .search .input-wrap > .icon { left: 14px; width: 18px; height: 18px; color: var(--color-ink-muted); transition: color var(--dur-fast); }
+.topbar .search .input-wrap:focus-within > .icon { color: var(--color-accent); }
+.topbar .search .input-wrap > .clear { right: 6px; width: 28px; height: 28px; }
+.hb-search-key { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.topbar .search:focus-within .hb-search-key, .topbar .search:has(.clear) .hb-search-key { display: none; }
 .hb-brand { flex: none; display: flex; align-items: center; width: calc(var(--sidebar-w) - 13px); padding-left: 13px; transition: width var(--dur-base) var(--ease), padding var(--dur-base) var(--ease); }
 .topbar.rail .hb-brand { width: calc(var(--rail-w) - 13px); padding-left: 17px; }
 /* Sized like rille's title bar lockup; the mark stays centred over the nav icons below. */
 .topbar .brand-word { font-size: 20px; }
 .topbar.rail .brand-word { display: none; }
-.hb-div { flex: none; width: 1px; height: 18px; background: var(--color-line); }
-.hb-hist { flex: none; display: flex; align-items: center; gap: 2px; }
-.hb-leds { flex: none; display: flex; align-items: center; gap: 12px; }
-.hb-led { display: inline-flex; align-items: center; gap: 5px; cursor: default; user-select: none; }
-.hb-led i { width: 7px; height: 7px; border-radius: 50%; background: var(--color-line-strong); transition: background var(--dur-base), box-shadow var(--dur-base); }
-.hb-led b { font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--color-ink-muted); }
+.hb-div { flex: none; width: 1px; height: 24px; background: var(--color-line); }
+.hb-hist { flex: none; display: flex; align-items: center; gap: 4px; }
+.hb-leds { flex: none; display: flex; align-items: center; gap: 14px; height: 32px; padding: 0 14px; border: 1px solid var(--color-line); border-radius: var(--radius-pill); background: var(--color-surface-2); }
+.hb-led { display: inline-flex; align-items: center; gap: 6px; cursor: default; user-select: none; }
+.hb-led i { width: 8px; height: 8px; border-radius: 50%; background: var(--color-line-strong); transition: background var(--dur-base), box-shadow var(--dur-base); }
+.hb-led b { font-size: var(--text-2xs); font-weight: 700; letter-spacing: .08em; color: var(--color-ink-muted); }
 .hb-led.on i { background: var(--color-accent); box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 55%, transparent); }
 .hb-led.busy i { background: var(--color-accent); box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 55%, transparent); animation: pulse-dot 1.4s ease-in-out infinite; }
 .hb-led.busy b { color: var(--color-ink); }
 .hb-led.warn i { background: var(--color-warn); }
 .hb-led.warn b { color: var(--color-warn); }
-.hb-clock { flex: none; font-family: var(--font-mono); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--color-ink-muted); letter-spacing: .02em; }
+.hb-clock { flex: none; font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--color-ink); letter-spacing: .02em; }
 @media (min-width: 1024px) { .topbar .only-mobile { display: none; } }
 @media (max-width: 1023px) {
-  .topbar { padding-left: 6px; gap: 10px; }
+  .topbar { padding-left: 8px; gap: 12px; }
   .hb-brand, .topbar.rail .hb-brand { width: auto; padding-left: 0; }
   .topbar.rail .brand-word { display: inline; }
 }
 /* Phones: search, palette and notifications at touch size. Navigation moves to the bottom tab bar
    (its "More" opens the drawer), settings into the drawer, history to the system back gesture. */
 @media (max-width: 720px) {
-  .hb-hist, .hb-leds, .hb-clock, .topbar .hb-div, .topbar .only-mobile, .topbar .hb-settings, .topbar .brand-word, .topbar.rail .brand-word { display: none; }
+  .hb-hist, .hb-leds, .hb-clock, .hb-search-key, .topbar .hb-div, .topbar .only-mobile, .topbar .hb-settings, .topbar .brand-word, .topbar.rail .brand-word { display: none; }
   .topbar { gap: 4px; padding-left: 12px; padding-right: 6px; }
   .topbar .search { max-width: none; margin: 0; }
   .topbar .btn-icon { width: var(--touch); height: var(--touch); }
@@ -118,11 +132,11 @@ html.col-resizing .sidebar, html.col-resizing .hb-brand { transition: none; }
 @media (display-mode: standalone) and (max-width: 1023px) { .topbar .hb-brand { display: none; } }
 /* Desktop app with the title strip folded away (Window Controls Overlay): the header is the title
    bar. It drags the window, its controls stay clickable, and it keeps clear of the browser's window
-   buttons, which sit in whatever part of the top edge the titlebar area leaves out. Those buttons are
-   centred on the titlebar area, so the header's content box is exactly that strip (any extra header
-   height goes below it) and its icons line up with them. */
+   buttons, which sit in whatever part of the top edge the titlebar area leaves out. The strip is too
+   short for a comfortable header, so the header keeps its own height with its content centred on it,
+   and the window buttons sit in the strip at the top corner, as in other apps with a tall title bar. */
 @media (display-mode: window-controls-overlay) {
-  .topbar { -webkit-app-region: drag; app-region: drag; height: env(titlebar-area-height, var(--header-h)); padding-top: env(titlebar-area-y, 0px); padding-bottom: max(0px, calc(var(--header-h) - env(titlebar-area-height, var(--header-h)))); padding-left: env(titlebar-area-x, 0px); padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
+  .topbar { -webkit-app-region: drag; app-region: drag; height: max(var(--header-h), env(titlebar-area-height, 0px)); padding-top: 0; padding-left: env(titlebar-area-x, 0px); padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px); }
   .topbar :is(a, button, input, .search, .hb-led) { -webkit-app-region: no-drag; app-region: no-drag; }
 }
 /* ...unless the window is phone-narrow: the strip stays an empty band (still dragging the window)
