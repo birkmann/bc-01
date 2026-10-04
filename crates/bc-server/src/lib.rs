@@ -8,6 +8,7 @@ pub mod auth;
 pub mod desktop;
 pub mod error;
 pub mod health;
+pub mod net;
 pub mod services;
 pub mod state;
 pub mod static_ui;
@@ -58,6 +59,7 @@ pub fn build_state(config: Config, opts: ServerOptions) -> anyhow::Result<AppSta
     if let Some(p) = &services.player {
         player = Some(Arc::new(services::PlayerSink(p.clone())));
     }
+    let net = Arc::new(net::Net::new(config.lan));
     Ok(AppState {
         db,
         bus,
@@ -65,6 +67,7 @@ pub fn build_state(config: Config, opts: ServerOptions) -> anyhow::Result<AppSta
         opts: Arc::new(opts),
         player,
         pairing: Arc::new(auth::PairingStore::default()),
+        net,
         services: Arc::new(services),
     })
 }
@@ -122,8 +125,9 @@ impl RunningServer {
         let _ = self.shutdown.send(());
         let _ = self.handle.await;
     }
+    /// Always the loopback address: stable across LAN switches, and browsers refuse `0.0.0.0`.
     pub fn url(&self) -> String {
-        format!("http://{}", self.addr)
+        format!("http://127.0.0.1:{}", self.addr.port())
     }
 }
 
@@ -133,24 +137,18 @@ pub async fn start(mut config: Config, opts: ServerOptions) -> anyhow::Result<Ru
     if matches!(std::env::var("BC_LAN"), Ok(v) if ["1", "true", "yes", "on"].contains(&v.trim().to_lowercase().as_str())) {
         config.lan = true;
     }
-    // LAN mode is the only way off loopback.
-    let host = if config.lan { "0.0.0.0".to_string() } else { "127.0.0.1".to_string() };
-    let listener = tokio::net::TcpListener::bind((host.as_str(), config.port)).await?;
+    let forced = config.lan;
+    // LAN mode (switched in Settings, or forced) is the only way off loopback.
+    config.lan = forced || net::saved(&config.db_path());
+    let listener = net::bind(config.lan, config.port).await?;
     let addr = listener.local_addr()?;
     config.port = addr.port();
-    config.host = host;
+    config.host = net::host(config.lan).to_string();
     let state = build_state(config, opts)?;
     state.services.start().await;
     let app = build_router(state.clone());
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-    let handle = tokio::spawn(async move {
-        let svc = app.into_make_service_with_connect_info::<SocketAddr>();
-        let _ = axum::serve(listener, svc)
-            .with_graceful_shutdown(async move {
-                let _ = rx.await;
-            })
-            .await;
-    });
+    let handle = net::spawn(state.net.clone(), listener, app, forced, rx);
     tracing::info!("bc-server listening on {addr}");
     Ok(RunningServer { addr, state, handle, shutdown: tx })
 }

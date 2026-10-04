@@ -14,6 +14,8 @@ use crate::util::{copy_text, enc};
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct AuthStatus {
     pub lan: bool,
+    #[serde(default)]
+    pub forced: bool,
     pub local: bool,
     pub authenticated: bool,
     pub bind: String,
@@ -37,12 +39,13 @@ pub struct DeviceOut {
 #[component]
 pub fn LanSection() -> impl IntoView {
     let status = qh(use_query::<AuthStatus>(|| Some(QuerySpec::new("/auth/status", &["auth"]))));
+    let done = Callback::new(move |_| status.refetch());
     view! {
         <SysCard title="LAN access" icon="wifi"
-            hint="Open Crate on your phone or another computer on the same network. LAN mode is opt-in and every other device must be paired with a short-lived code.">
+            hint="Open bc on your phone or another computer on the same network. LAN mode is opt-in and every other device must be paired with a short-lived code.">
             <QueryError q=status />
             <Show when=move || status.data.get().is_none() && status.error.get().is_none()><Skeleton height="48px" /></Show>
-            {move || status.data.get().map(|s| { let (lan, local, bind) = (s.lan, s.local, s.bind.clone()); view! {
+            {move || status.data.get().map(|s| { let (lan, local, forced, bind) = (s.lan, s.local, s.forced, s.bind.clone()); view! {
                 <div class="row gap wrap">
                     {if lan {
                         view! { <StatusBadge tone=Tone::Ok label="LAN mode on" /> }.into_any()
@@ -51,12 +54,18 @@ pub fn LanSection() -> impl IntoView {
                     }}
                     <Badge icon="monitor">{if local { "This is the host machine" } else { "Remote device" }}</Badge>
                     <span class="mono faint">{format!("bind {bind}")}</span>
+                    {(lan && local).then(|| view! { <LanSwitch on=false label="Turn off" done=done /> })}
                 </div>
+                {(lan && local && forced).then(|| view! {
+                    <p class="sys-hint faint">"bc was started with --lan or BC_LAN, so LAN mode is on again at the next start even if you turn it off here."</p>
+                })}
             }})}
         </SysCard>
         {move || status.data.get().map(|s| {
-            if !s.lan {
-                view! { <EnableLan /> }.into_any()
+            if !s.lan && s.local {
+                view! { <EnableLan done=done /> }.into_any()
+            } else if !s.lan {
+                view! { <></> }.into_any()
             } else if !s.local {
                 view! { <RemoteNote authenticated=s.authenticated /> }.into_any()
             } else {
@@ -66,19 +75,41 @@ pub fn LanSection() -> impl IntoView {
     }
 }
 
+/// Turns LAN mode on or off. The server rebinds on the same port, so this window keeps working.
 #[component]
-fn EnableLan() -> impl IntoView {
-    let cmd = "BC_LAN=1 bc serve";
+fn LanSwitch(on: bool, #[prop(into)] label: String, done: Callback<()>) -> impl IntoView {
+    let busy = RwSignal::new(false);
+    let click = move |_| {
+        busy.set(true);
+        spawn_local(async move {
+            match api::post::<_, serde_json::Value>("/auth/lan", &serde_json::json!({ "on": on })).await {
+                Ok(_) => {
+                    toast_ok(if on { "LAN mode is on" } else { "LAN mode is off" });
+                    done.run(());
+                }
+                Err(e) => toast_err(&e.message()),
+            }
+            busy.set(false);
+        });
+    };
+    let variant = if on { Variant::Primary } else { Variant::Outline };
     view! {
-        <SysCard title="Enable LAN mode" icon="lock" hint="LAN mode listens on your network address instead of localhost only. It cannot be switched on from the browser, on purpose.">
+        <Button variant=variant size=crate::ds::Size::Sm icon="wifi" busy=busy on_click=click>{label}</Button>
+    }
+}
+
+#[component]
+fn EnableLan(done: Callback<()>) -> impl IntoView {
+    view! {
+        <SysCard title="Enable LAN mode" icon="lock"
+            hint="LAN mode listens on your network address instead of localhost only. Only this computer can switch it, and it stays on across restarts until you turn it off."
+            actions=crate::ds::children(move || view! { <LanSwitch on=true label="Turn on LAN mode" done=done /> })>
             <ol class="sys-steps">
-                <li>"Quit Crate."</li>
-                <li>"Start it again with LAN mode enabled:"
-                    <div class="code-line"><code class="mono">{cmd}</code>
-                        <Button size=crate::ds::Size::Sm icon="copy" title="Copy command" on_click=move |_| { copy_text(cmd); toast_ok("Command copied"); }>"Copy"</Button></div></li>
-                <li>"Return here and create a pairing code for each device."</li>
+                <li>"Turn on LAN mode."</li>
+                <li>"Create a pairing code for each device and scan it with the phone."</li>
+                <li>"Allow incoming connections on this port if a firewall is running."</li>
             </ol>
-            <p class="sys-hint faint">"The desktop app reads the same BC_LAN environment variable. Localhost is always trusted; every other device needs a pairing token."</p>
+            <p class="sys-hint faint">"Localhost is always trusted; every other device needs a pairing token. Starting bc with --lan or BC_LAN=1 works too."</p>
         </SysCard>
     }
 }
@@ -88,7 +119,7 @@ fn RemoteNote(authenticated: bool) -> impl IntoView {
     view! {
         <SysCard title="Pairing" icon="qr">
             <EmptyState icon="lock" title="Pairing is managed on the host machine"
-                hint={if authenticated { "This device is paired. Open Settings on the computer running Crate to pair more devices or revoke access." } else { "Open Settings on the computer running Crate to create a pairing code." }} />
+                hint={if authenticated { "This device is paired. Open Settings on the computer running bc to pair more devices or revoke access." } else { "Open Settings on the computer running bc to create a pairing code." }} />
         </SysCard>
     }
 }
@@ -181,7 +212,7 @@ fn Devices() -> impl IntoView {
     let q = qh(use_query::<Vec<DeviceOut>>(|| Some(QuerySpec::new("/auth/devices", &["auth.devices"]))));
     let revoke = move |d: DeviceOut| {
         spawn_local(async move {
-            if confirm("Revoke this device?", &format!("\"{}\" will have to be paired again to open Crate.", d.name), "Revoke", true).await {
+            if confirm("Revoke this device?", &format!("\"{}\" will have to be paired again to open bc.", d.name), "Revoke", true).await {
                 match api::call("DELETE", &format!("/auth/devices/{}", d.id)).await {
                     Ok(()) => q.refetch(),
                     Err(e) => toast_err(&e.message()),

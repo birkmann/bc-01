@@ -20,6 +20,8 @@ pub struct AppState {
     pub opts: Arc<ServerOptions>,
     pub player: Option<Arc<dyn CommandSink>>,
     pub pairing: Arc<crate::auth::PairingStore>,
+    /// Live LAN mode; `config.lan` is only the value it started with.
+    pub net: Arc<crate::net::Net>,
     pub services: Arc<crate::services::Services>,
 }
 

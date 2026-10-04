@@ -194,25 +194,32 @@ pub fn send_client_msg(m: &ClientMsg) -> bool {
     open
 }
 
+/// Handlers run one by one from a snapshot, and one of them (or the cache invalidation before
+/// them) can re-render a view and dispose the owners of later ones. Each handler is therefore
+/// re-checked just before its turn: a handler unsubscribed meanwhile would touch disposed state.
 fn deliver(ev: &Event) {
     if ev.topic == bc_types::events::TOPIC_INVALIDATE {
         if let Ok(inv) = serde_json::from_value::<Invalidate>(ev.payload.clone()) {
             cache::invalidate_entity(&inv.entity, &inv.ids);
-            let hs: Vec<InvHandler> = with_hub(|h| {
-                h.inv_handlers.iter().filter(|(_, e, _)| *e == inv.entity).map(|(_, _, f)| f.clone()).collect()
+            let hs: Vec<(u64, InvHandler)> = with_hub(|h| {
+                h.inv_handlers.iter().filter(|(_, e, _)| *e == inv.entity).map(|(i, _, f)| (*i, f.clone())).collect()
             })
             .unwrap_or_default();
-            for f in hs {
-                f(&inv.ids);
+            for (id, f) in hs {
+                if with_hub(|h| h.inv_handlers.iter().any(|(i, _, _)| *i == id)).unwrap_or(false) {
+                    f(&inv.ids);
+                }
             }
         }
     }
-    let hs: Vec<Handler> = with_hub(|h| {
-        h.handlers.iter().filter(|(_, t, _)| t == &ev.topic || t == "*").map(|(_, _, f)| f.clone()).collect()
+    let hs: Vec<(u64, Handler)> = with_hub(|h| {
+        h.handlers.iter().filter(|(_, t, _)| t == &ev.topic || t == "*").map(|(i, _, f)| (*i, f.clone())).collect()
     })
     .unwrap_or_default();
-    for f in hs {
-        f(&ev.payload);
+    for (id, f) in hs {
+        if with_hub(|h| h.handlers.iter().any(|(i, _, _)| *i == id)).unwrap_or(false) {
+            f(&ev.payload);
+        }
     }
 }
 

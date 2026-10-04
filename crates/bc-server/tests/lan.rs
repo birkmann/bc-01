@@ -70,3 +70,74 @@ fn host_matching() {
     assert!(!bc_server::auth::host_is_local("evil.com:8420"));
     assert!(!bc_server::auth::host_is_local("127.0.0.1.evil.com"));
 }
+
+fn switch(on: bool, ip: &str, host: &str, origin: Option<&str>) -> axum::http::Request<axum::body::Body> {
+    let mut b = axum::http::Request::builder().method("POST").uri("/api/auth/lan").header("host", host).header("content-type", "application/json");
+    if let Some(o) = origin {
+        b = b.header("origin", o);
+    }
+    from_peer(b.body(axum::body::Body::from(format!(r#"{{"on":{on}}}"#))).unwrap(), ip)
+}
+
+#[tokio::test]
+async fn host_machine_switches_lan_mode_and_it_is_saved() {
+    let d = tempfile::tempdir().unwrap();
+    let config = common::config(d.path());
+    let db_path = config.db_path();
+    let app = bc_server::build_app_with(config, common::opts_with_ui(None)).unwrap();
+    // LAN off: a remote peer is refused outright, and cannot switch it on.
+    assert_eq!(app.clone().oneshot(from_peer(common::get("/api/doctor"), "192.168.1.20")).await.unwrap().status(), 403);
+    assert_eq!(app.clone().oneshot(switch(true, "192.168.1.20", "localhost", None)).await.unwrap().status(), 403);
+    // Neither can another web page in the host's browser.
+    assert_eq!(app.clone().oneshot(switch(true, "127.0.0.1", "127.0.0.1:8420", Some("http://evil.com"))).await.unwrap().status(), 403);
+
+    let resp = app.clone().oneshot(switch(true, "127.0.0.1", "127.0.0.1:8420", Some("http://127.0.0.1:8420"))).await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = serde_json::from_str(&common::body_string(resp).await).unwrap();
+    assert_eq!(v["lan"], true);
+    assert!(bc_server::net::saved(&db_path), "the choice survives a restart");
+    // Now remote peers get the token check instead.
+    assert_eq!(app.clone().oneshot(from_peer(common::get("/api/doctor"), "192.168.1.20")).await.unwrap().status(), 401);
+
+    assert_eq!(app.clone().oneshot(switch(false, "127.0.0.1", "localhost", None)).await.unwrap().status(), 200);
+    assert!(!bc_server::net::saved(&db_path));
+    assert_eq!(app.oneshot(from_peer(common::get("/api/doctor"), "192.168.1.20")).await.unwrap().status(), 403);
+}
+
+#[tokio::test]
+async fn rebinding_page_on_loopback_is_not_the_host_machine() {
+    let d = tempfile::tempdir().unwrap();
+    let app = bc_server::build_app_with(lan_config(d.path()), common::opts_with_ui(None)).unwrap();
+    let req = axum::http::Request::builder().uri("/api/doctor").header("host", "evil.com:8420").body(axum::body::Body::empty()).unwrap();
+    assert_eq!(app.clone().oneshot(from_peer(req, "127.0.0.1")).await.unwrap().status(), 401);
+    let req = axum::http::Request::builder().method("POST").uri("/api/auth/pairing").header("host", "evil.com:8420").body(axum::body::Body::empty()).unwrap();
+    assert_eq!(app.oneshot(from_peer(req, "127.0.0.1")).await.unwrap().status(), 401);
+}
+
+async fn health(port: u16) -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let Ok(mut s) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else { return false };
+    let _ = s.write_all(b"GET /api/health HTTP/1.0\r\nHost: localhost\r\n\r\n").await;
+    let mut out = String::new();
+    let _ = s.read_to_string(&mut out).await;
+    out.starts_with("HTTP/1.0 200") || out.starts_with("HTTP/1.1 200")
+}
+
+#[tokio::test]
+async fn switching_rebinds_on_the_same_port() {
+    let d = tempfile::tempdir().unwrap();
+    let srv = bc_server::start(common::config(d.path()), common::opts_with_ui(None)).await.unwrap();
+    let port = srv.addr.port();
+    assert!(srv.addr.ip().is_loopback());
+    assert!(health(port).await);
+
+    srv.state.net.set_lan(true).await.unwrap();
+    assert!(srv.state.net.lan());
+    assert!(health(port).await, "still reachable on loopback after going LAN");
+    assert_eq!(srv.url(), format!("http://127.0.0.1:{port}"));
+
+    srv.state.net.set_lan(false).await.unwrap();
+    assert!(!srv.state.net.lan());
+    assert!(health(port).await);
+    srv.stop().await;
+}

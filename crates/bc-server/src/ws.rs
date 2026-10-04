@@ -1,8 +1,9 @@
 //! `/api/ws`: Hello(last_event_id) resume, broadcast fan-out, heartbeat and
 //! player commands.
+use std::net::SocketAddr;
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{ConnectInfo, Request, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use bc_core::events::Replay;
@@ -11,8 +12,20 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::state::AppState;
 
-pub async fn upgrade(State(st): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |sock| session(st, sock))
+pub async fn upgrade(State(st): State<AppState>, ws: WebSocketUpgrade, req: Request) -> Response {
+    let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
+    // An upgraded socket never meets the auth guard again: a remote one ends with LAN mode.
+    let lan = (!crate::auth::is_loopback(peer)).then(|| st.net.subscribe());
+    ws.on_upgrade(move |sock| session(st, sock, lan))
+}
+
+async fn lan_off(lan: &mut Option<tokio::sync::watch::Receiver<bool>>) {
+    match lan {
+        Some(rx) => {
+            let _ = rx.wait_for(|on| !on).await;
+        }
+        None => std::future::pending().await,
+    }
 }
 
 fn synthetic(epoch: u64, topic: &str, payload: serde_json::Value) -> String {
@@ -23,7 +36,7 @@ async fn send(sock: &mut WebSocket, text: String) -> bool {
     sock.send(Message::Text(text.into())).await.is_ok()
 }
 
-async fn session(st: AppState, mut sock: WebSocket) {
+async fn session(st: AppState, mut sock: WebSocket, mut lan: Option<tokio::sync::watch::Receiver<bool>>) {
     let epoch = st.bus.epoch();
     // Subscribe first so nothing published during replay is lost; dedupe by seq.
     let mut rx = st.bus.subscribe();
@@ -40,6 +53,7 @@ async fn session(st: AppState, mut sock: WebSocket) {
     loop {
         tokio::select! {
             _ = &mut hello_deadline, if !ready => { ready = true; }
+            _ = lan_off(&mut lan) => break,
             _ = hb.tick() => {
                 let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
                 if !send(&mut sock, synthetic(epoch, "hb", serde_json::json!({ "t": t }))).await { break; }

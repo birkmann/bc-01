@@ -103,15 +103,21 @@ fn is_public_path(path: &str) -> bool {
 pub async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response {
     let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
     let host = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    let local_peer = is_loopback(peer);
-    if !st.config.lan {
-        // Loopback-only server: reject foreign Host headers outright.
-        if !host.is_empty() && !host_is_local(&host) {
+    let local_host = host.is_empty() || host_is_local(&host);
+    if !st.net.lan() {
+        // Loopback-only server: reject foreign Host headers outright, and remote peers on
+        // connections still open from before LAN mode went off.
+        if !local_host {
             return ApiError::forbidden(format!("host '{host}' not allowed")).into_response();
+        }
+        if !is_loopback(peer) {
+            return ApiError::forbidden("LAN mode is off").into_response();
         }
         return next.run(req).await;
     }
-    if local_peer || is_public_path(req.uri().path()) {
+    // A loopback peer is the host machine only under a loopback Host name: a page that
+    // DNS-rebinds its own name to 127.0.0.1 gets the token check like any other device.
+    if (is_loopback(peer) && local_host) || is_public_path(req.uri().path()) {
         return next.run(req).await;
     }
     let tok = token_from(req.headers(), req.uri().query());
@@ -132,6 +138,7 @@ pub async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Resp
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/status", get(status))
+        .route("/auth/lan", post(set_lan))
         .route("/auth/pairing", post(create_pairing))
         .route("/auth/pairing/qr.svg", get(qr))
         .route("/auth/pair", post(pair))
@@ -142,6 +149,8 @@ pub fn router() -> Router<AppState> {
 #[derive(Serialize)]
 struct Status {
     lan: bool,
+    /// Started with `--lan` / `BC_LAN`: LAN mode is on again at the next start.
+    forced: bool,
     local: bool,
     authenticated: bool,
     bind: String,
@@ -149,8 +158,8 @@ struct Status {
 
 async fn status(State(st): State<AppState>, req: Request) -> Json<Status> {
     let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
-    let local = is_loopback(peer);
-    let mut authenticated = local || !st.config.lan;
+    let local = is_loopback(peer) && req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).is_none_or(host_is_local);
+    let mut authenticated = local || !st.net.lan();
     if !authenticated
         && let Some(t) = token_from(req.headers(), req.uri().query()) {
             let h = hash(&t);
@@ -160,7 +169,35 @@ async fn status(State(st): State<AppState>, req: Request) -> Json<Status> {
                 .await
                 .unwrap_or(false);
         }
-    Json(Status { lan: st.config.lan, local, authenticated, bind: format!("{}:{}", st.config.host, st.config.port) })
+    Json(status_of(&st, local, authenticated))
+}
+
+fn status_of(st: &AppState, local: bool, authenticated: bool) -> Status {
+    let lan = st.net.lan();
+    Status { lan, forced: st.net.forced(), local, authenticated, bind: format!("{}:{}", crate::net::host(lan), st.config.port) }
+}
+
+#[derive(Deserialize)]
+struct LanIn {
+    on: bool,
+}
+
+/// Switch LAN mode from Settings. Host machine only; the JSON body (a cross-site form cannot
+/// send one without a CORS preflight, which this server never grants) and the Origin check
+/// keep other web pages from flipping it.
+async fn set_lan(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(body): Json<LanIn>) -> ApiResult<Json<Status>> {
+    require_local(Some(peer))?;
+    if let Some(o) = headers.get(header::ORIGIN) {
+        let origin = o.to_str().unwrap_or("");
+        let host = origin.split_once("://").map(|(_, h)| h).unwrap_or("");
+        if host.is_empty() || !host_is_local(host) {
+            return Err(ApiError::forbidden(format!("origin '{origin}' not allowed")));
+        }
+    }
+    st.net.set_lan(body.on).await.map_err(|e| ApiError::new(500, "Internal Server Error").detail(format!("cannot switch LAN mode: {e}")))?;
+    let v = if body.on { "true" } else { "false" };
+    st.db.write_async(move |t| Ok(bc_db::settings::set(t, crate::net::SETTING_KEY, v)?)).await?;
+    Ok(Json(status_of(&st, true, true)))
 }
 
 fn require_local(peer: Option<SocketAddr>) -> ApiResult<()> {
@@ -184,8 +221,8 @@ fn local_ip() -> Option<IpAddr> {
 
 async fn create_pairing(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>) -> ApiResult<Json<PairingOut>> {
     require_local(Some(peer))?;
-    if !st.config.lan {
-        return Err(ApiError::new(409, "Conflict").detail("LAN mode is off (set BC_LAN=1 and restart)"));
+    if !st.net.lan() {
+        return Err(ApiError::new(409, "Conflict").detail("LAN mode is off (turn it on in Settings > LAN)"));
     }
     let code = st.pairing.issue();
     let ip = local_ip();
@@ -221,7 +258,7 @@ struct PairOut {
 }
 
 async fn pair(State(st): State<AppState>, Json(body): Json<PairIn>) -> ApiResult<Response> {
-    if !st.config.lan {
+    if !st.net.lan() {
         return Err(ApiError::new(409, "Conflict").detail("LAN mode is off"));
     }
     if !st.pairing.redeem(&body.code) {
