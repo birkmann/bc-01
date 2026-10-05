@@ -104,15 +104,19 @@ pub fn read_file_tags(path: &Path) -> FileTags {
     out
 }
 
-/// Cover for a folder: embedded art of the first few files that have one, then a sidecar image.
+/// Cover for one release's files: embedded art of the first few files that have one, then (when
+/// `sidecar` is set, i.e. the folder holds only this release) a sidecar image in `folder`.
 /// Decoding/resizing/encoding happens here (stage b, no DB access).
-pub fn find_cover(folder: &Path, files: &[&Path]) -> Option<CoverArt> {
+pub fn find_cover(folder: &Path, files: &[&Path], sidecar: bool) -> Option<CoverArt> {
     for f in files.iter().take(3) {
         if let Some(a) = mtags::read_embedded_art(f)
             && let Ok(p) = martwork::process_cover(&a.data)
         {
             return Some(CoverArt { source: "embedded", processed: p });
         }
+    }
+    if !sidecar {
+        return None;
     }
     let side = mtags::find_sidecar_cover(folder)?;
     let data = std::fs::read(side).ok()?;

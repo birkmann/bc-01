@@ -54,6 +54,12 @@ impl LibraryService {
         let _ = tokio::task::spawn_blocking(move || bc_scan::roots::ensure_roots(&ctx)).await;
         *self.watcher.lock() = Some(bc_scan::watcher::Watcher::start(&self.ctx));
         crate::ledger::spawn(self.ctx.clone());
+        let ctx = self.ctx.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = bc_scan::art::repair_shared_folder_art(&ctx) {
+                tracing::warn!(error = %e, "repairing shared-folder cover art failed");
+            }
+        });
         let pending: i64 = self
             .ctx
             .read_async(|c| Ok(c.query_row("SELECT COUNT(*) FROM artwork WHERE source = 'legacy' AND sizes = 0", [], |r| r.get(0))?))

@@ -77,6 +77,89 @@ pub fn convert_one(ctx: &Ctx, release_id: i64) -> ApiResult<()> {
     Ok(())
 }
 
+const SHARED_FOLDER_ART_MIGRATION: &str = "shared_folder_art_v1";
+
+/// Re-extract the covers of releases that share a folder with other releases (a flat download
+/// folder). Older scans took one cover per folder, so every release in such a folder showed the
+/// first file's art. Each release now takes the embedded art of its own files; one without any
+/// loses its cover (a sidecar image in a shared folder belongs to no release in particular).
+/// Runs once (data-migration marker); returns the releases changed. Blocking.
+pub fn repair_shared_folder_art(ctx: &Ctx) -> ApiResult<usize> {
+    if ctx.read(|c| Ok(bc_db::migrate::data_migration_done(c, SHARED_FOLDER_ART_MIGRATION)?))? {
+        return Ok(0);
+    }
+    let rows: Vec<(i64, String, Vec<String>)> = ctx.read(|c| {
+        let mut st = c.prepare(
+            "SELECT r.id, r.folder_path FROM releases r JOIN artwork a ON a.release_id = r.id
+              WHERE a.source IN ('embedded', 'sidecar')
+                AND r.folder_path IN (SELECT folder_path FROM releases WHERE folder_path IS NOT NULL
+                                       GROUP BY folder_path HAVING COUNT(*) > 1)
+              ORDER BY r.id",
+        )?;
+        let ids: Vec<(i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        let mut files = c.prepare(
+            "SELECT f.path FROM files f JOIN tracks t ON t.id = f.track_id
+              WHERE t.release_id = ?1 AND f.missing_since IS NULL
+              ORDER BY t.disc_no, t.track_no, f.path LIMIT 3",
+        )?;
+        let mut out = Vec::with_capacity(ids.len());
+        for (id, folder) in ids {
+            let paths = files.query_map([id], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+            out.push((id, folder, paths));
+        }
+        Ok(out)
+    })?;
+    let art_dir = ctx.config.art_dir();
+    let found: Vec<(i64, Option<Converted>)> = rows
+        .into_par_iter()
+        .map(|(id, folder, paths)| {
+            let paths: Vec<&Path> = paths.iter().map(Path::new).collect();
+            let conv = media::find_cover(Path::new(&folder), &paths, false).and_then(|c| {
+                let mask = media::write_cover_files(&art_dir, id, &c)
+                    .map_err(|e| tracing::warn!(release_id = id, error = %e, "writing cover art failed"))
+                    .ok()?;
+                Some(Converted { release_id: id, full: media::full_art_path(&art_dir, id), mask, art: c.processed })
+            });
+            (id, conv)
+        })
+        .collect();
+    let (with, without): (Vec<_>, Vec<_>) = found.into_iter().partition(|(_, c)| c.is_some());
+    let with: Vec<Converted> = with.into_iter().filter_map(|(_, c)| c).collect();
+    let without: Vec<i64> = without.into_iter().map(|(id, _)| id).collect();
+    let mut changed: Vec<i64> = with.iter().map(|c| c.release_id).collect();
+    changed.extend(&without);
+    bc_maint::tidy::delete_artwork(&art_dir, &without);
+    ctx.write(move |tx| {
+        for c in &with {
+            tx.prepare_cached(
+                "UPDATE artwork SET hash = ?1, version = ?2, blurhash = ?3, color = ?4, width = ?5, height = ?6,
+                        sizes = ?7, source = 'embedded', updated_at = CURRENT_TIMESTAMP
+                  WHERE release_id = ?8",
+            )?
+            .execute(params![
+                c.art.hash,
+                media::version_string(&c.art, c.mask),
+                c.art.blurhash,
+                c.art.color,
+                c.art.width,
+                c.art.height,
+                c.mask as i64,
+                c.release_id
+            ])?;
+            tx.prepare_cached("UPDATE releases SET cover_path = ?1 WHERE id = ?2")?.execute(params![c.full.to_string_lossy(), c.release_id])?;
+        }
+        bc_maint::tidy::delete_artwork_rows(tx, &without)?;
+        tx.execute("UPDATE releases SET cover_path = NULL WHERE id IN (SELECT value FROM json_each(?1))", [serde_json::to_string(&without).unwrap_or_default()])?;
+        Ok(bc_db::migrate::mark_data_migration(tx, SHARED_FOLDER_ART_MIGRATION)?)
+    })?;
+    let n = changed.len();
+    if n > 0 {
+        tracing::info!(releases = n, "re-extracted cover art in shared folders");
+        ctx.bus.invalidate("release", changed);
+    }
+    Ok(n)
+}
+
 fn low_priority_pool(threads: usize) -> Option<rayon::ThreadPool> {
     rayon::ThreadPoolBuilder::new()
         .num_threads(threads)

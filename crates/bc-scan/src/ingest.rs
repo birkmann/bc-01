@@ -565,9 +565,48 @@ pub fn ingest_batch(tx: &Transaction<'_>, root: &RootInfo, files: &[ReadFile], o
 
 // ------------------------------------------------------------------ stage b: read
 
-/// Read tags for `items` in parallel and, for folders whose release may lack art, one cover per
-/// folder. `art_folders` holds folders that already have art (skipped). No DB access here.
-pub fn read_items(items: Vec<WorkItem>, art_folders: &HashSet<String>, want_art: bool) -> Vec<ReadFile> {
+/// Which `(folder, album)` groups already have art, and which folders hold more than one album.
+/// Read once per pipeline run (see [`ArtKnown::load`]).
+#[derive(Debug, Default)]
+pub struct ArtKnown {
+    /// `(folder_path, album key)` of releases that have a cover.
+    pub covered: HashSet<(String, String)>,
+    /// Folders the library already knows hold several releases.
+    pub mixed: HashSet<String>,
+}
+
+impl ArtKnown {
+    pub fn load(c: &bc_db::rusqlite::Connection) -> ApiResult<Self> {
+        let mut st = c.prepare(
+            "SELECT r.folder_path, r.title_key, COALESCE(a.name_key, '') FROM releases r
+               LEFT JOIN artists a ON a.id = r.artist_id
+              WHERE r.cover_path IS NOT NULL AND r.folder_path IS NOT NULL",
+        )?;
+        let covered = st
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, album_key(&r.get::<_, String>(2)?, &r.get::<_, String>(1)?))))?
+            .collect::<Result<HashSet<_>, _>>()?;
+        let mut st = c.prepare("SELECT folder_path FROM releases WHERE folder_path IS NOT NULL GROUP BY folder_path HAVING COUNT(*) > 1")?;
+        let mixed = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<HashSet<_>, _>>()?;
+        Ok(Self { covered, mixed })
+    }
+}
+
+/// Group key of a file's release within its folder: album artist (else artist) and album title,
+/// as [`get_or_create_release`] identifies it. The year is left out (it rarely splits a folder).
+fn album_key(artist_key: &str, title_key: &str) -> String {
+    format!("{artist_key}\u{1f}{title_key}")
+}
+
+fn file_album_key(t: &FileTags) -> String {
+    let artist = t.album_artist.as_deref().or(t.artist.as_deref()).map(name_key).unwrap_or_default();
+    let title = name_key(t.album.as_deref().map(str::trim).filter(|t| !t.is_empty()).unwrap_or(UNKNOWN_ALBUM));
+    album_key(&artist, &title)
+}
+
+/// Read tags for `items` in parallel and one cover per release group (folder + album) that may
+/// still lack art. A folder holding several albums (a flat download folder) never takes a
+/// sidecar image: it cannot tell which album the image belongs to. No DB access here.
+pub fn read_items(items: Vec<WorkItem>, known: &ArtKnown, want_art: bool) -> Vec<ReadFile> {
     let mut read: Vec<ReadFile> = items
         .into_par_iter()
         .map(|item| {
@@ -578,22 +617,33 @@ pub fn read_items(items: Vec<WorkItem>, art_folders: &HashSet<String>, want_art:
     if !want_art {
         return read;
     }
-    // folder -> indexes of its files
-    let mut by_folder: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+    // (folder, album) -> indexes of its files
+    let mut groups: HashMap<(PathBuf, String), Vec<usize>> = HashMap::new();
     for (i, rf) in read.iter().enumerate() {
         if let Some(p) = rf.item.path.parent() {
-            by_folder.entry(p.to_path_buf()).or_default().push(i);
+            groups.entry((p.to_path_buf(), file_album_key(&rf.tags))).or_default().push(i);
         }
     }
-    let todo: Vec<(PathBuf, Vec<usize>)> = by_folder
-        .into_iter()
-        .filter(|(f, _)| !art_folders.contains(f.to_string_lossy().as_ref()))
+    let mut albums_in: HashMap<&Path, usize> = HashMap::new();
+    for (folder, _) in groups.keys() {
+        *albums_in.entry(folder.as_path()).or_default() += 1;
+    }
+    let todo: Vec<(PathBuf, bool, Vec<usize>)> = groups
+        .iter()
+        .filter_map(|((folder, album), idxs)| {
+            let f = folder.to_string_lossy().into_owned();
+            if known.covered.contains(&(f.clone(), album.clone())) {
+                return None;
+            }
+            let sidecar = albums_in[folder.as_path()] == 1 && !known.mixed.contains(&f);
+            Some((folder.clone(), sidecar, idxs.clone()))
+        })
         .collect();
     let found: Vec<(Vec<usize>, Arc<CoverArt>)> = todo
         .into_par_iter()
-        .filter_map(|(folder, idxs)| {
+        .filter_map(|(folder, sidecar, idxs)| {
             let paths: Vec<&Path> = idxs.iter().map(|&i| read[i].item.path.as_path()).collect();
-            crate::media::find_cover(&folder, &paths).map(|c| (idxs, Arc::new(c)))
+            crate::media::find_cover(&folder, &paths, sidecar).map(|c| (idxs, Arc::new(c)))
         })
         .collect();
     for (idxs, cover) in found {
@@ -685,15 +735,7 @@ pub fn run_pipeline(
     }
     work.sort_by(|a, b| a.path.cmp(&b.path));
     let total = work.len() as i64;
-    let art_folders: HashSet<String> = if opts.skip_art {
-        HashSet::new()
-    } else {
-        ctx.db
-            .read_with::<_, ApiError>(|c| {
-                let mut st = c.prepare("SELECT DISTINCT folder_path FROM releases WHERE cover_path IS NOT NULL AND folder_path IS NOT NULL")?;
-                Ok(st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<HashSet<_>, _>>()?)
-            })?
-    };
+    let art_known = if opts.skip_art { ArtKnown::default() } else { ctx.db.read_with::<_, ApiError>(ArtKnown::load)? };
     // Chunk boundaries on folder changes.
     let mut chunks: Vec<Vec<WorkItem>> = Vec::new();
     let mut cur: Vec<WorkItem> = Vec::new();
@@ -712,13 +754,13 @@ pub fn run_pipeline(
     let mut done = 0i64;
     let mut fatal: Option<ApiError> = None;
     std::thread::scope(|s| {
-        let art_folders = &art_folders;
+        let art_known = &art_known;
         s.spawn(move || {
             for chunk in chunks {
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
-                let read = read_items(chunk, art_folders, want_art);
+                let read = read_items(chunk, art_known, want_art);
                 if tx.send(read).is_err() {
                     break;
                 }

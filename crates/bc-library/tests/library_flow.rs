@@ -23,7 +23,11 @@ struct Flow {
 }
 
 fn jpeg() -> Vec<u8> {
-    let img = image::RgbImage::from_pixel(64, 64, image::Rgb([0, 153, 255]));
+    jpeg_rgb([0, 153, 255])
+}
+
+fn jpeg_rgb(rgb: [u8; 3]) -> Vec<u8> {
+    let img = image::RgbImage::from_pixel(64, 64, image::Rgb(rgb));
     let mut buf = std::io::Cursor::new(vec![]);
     img.write_to(&mut buf, image::ImageFormat::Jpeg).unwrap();
     buf.into_inner()
@@ -219,6 +223,63 @@ async fn art_is_extracted_streams_are_ranged_and_tags_become_facets() {
         assert!(names.iter().any(|x| x.eq_ignore_ascii_case(n)), "{n} in {names:?}");
     }
     assert_eq!(f.json(Method::GET, "/tracks?tags=TECHNO", None).await.1["total"], 2);
+}
+
+/// One file per album in a flat folder (as a fan shelf is downloaded), each with its own cover.
+fn write_flat(folder: &Path, files: &[(&str, &str, &str, Option<[u8; 3]>)]) {
+    std::fs::create_dir_all(folder).unwrap();
+    for (name, artist, album, rgb) in files {
+        let p = folder.join(name);
+        std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("../bc-media/tests/fixtures/sine.mp3"), &p).unwrap();
+        let mut t = Tag::new(TagType::Id3v2);
+        t.set_title((*name).into());
+        t.set_artist((*artist).into());
+        t.set_album((*album).into());
+        if let Some(rgb) = rgb {
+            t.push_picture(Picture::unchecked(jpeg_rgb(*rgb)).pic_type(PictureType::CoverFront).mime_type(MimeType::Jpeg).build());
+        }
+        t.save_to_path(&p, WriteOptions::default()).unwrap();
+    }
+}
+
+fn art_by_title(f: &Flow) -> std::collections::HashMap<String, Option<String>> {
+    let c = rusqlite_conn(f);
+    let mut st = c.prepare("SELECT r.title, a.hash FROM releases r LEFT JOIN artwork a ON a.release_id = r.id").unwrap();
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+}
+
+fn rusqlite_conn(f: &Flow) -> bc_db::rusqlite::Connection {
+    bc_db::rusqlite::Connection::open(f.dir.path().join("library.db")).unwrap()
+}
+
+#[tokio::test]
+async fn albums_sharing_a_flat_folder_keep_their_own_covers() {
+    let f = started().await;
+    let flat = f.music.join("shelf");
+    write_flat(&flat, &[
+        ("a1.mp3", "Red Artist", "Red", Some([220, 20, 20])),
+        ("a2.mp3", "Red Artist", "Red", Some([220, 20, 20])),
+        ("b1.mp3", "Blue Artist", "Blue", Some([20, 20, 220])),
+        ("c1.mp3", "Bare Artist", "Bare", None),
+    ]);
+    std::fs::write(flat.join("cover.jpg"), jpeg_rgb([20, 220, 20])).unwrap();
+    f.scan().await;
+    let art = art_by_title(&f);
+    let (red, blue) = (art["Red"].clone().expect("red art"), art["Blue"].clone().expect("blue art"));
+    assert_ne!(red, blue, "each album takes its own embedded cover");
+    assert_eq!(art["Bare"], None, "a sidecar in a mixed folder belongs to no album");
+
+    // A library scanned before the fix: Blue carries Red's cover. The repair pass re-extracts it.
+    let c = rusqlite_conn(&f);
+    c.execute_batch(&format!(
+        "UPDATE artwork SET hash = '{red}' WHERE release_id = (SELECT id FROM releases WHERE title = 'Blue');
+         DELETE FROM settings WHERE key LIKE '%shared_folder_art_v1%';"
+    ))
+    .unwrap();
+    let ctx = f.svc.ctx().clone();
+    let n = tokio::task::spawn_blocking(move || bc_scan::art::repair_shared_folder_art(&ctx)).await.unwrap().unwrap();
+    assert!(n >= 1);
+    assert_eq!(art_by_title(&f)["Blue"].as_deref(), Some(blue.as_str()));
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
