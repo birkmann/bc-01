@@ -11,6 +11,7 @@ pub mod history;
 pub mod home;
 pub mod import;
 pub mod labels;
+pub mod ledger;
 pub mod releases;
 pub mod routes;
 pub mod sqlb;

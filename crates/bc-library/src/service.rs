@@ -46,12 +46,14 @@ impl LibraryService {
         &self.ctx
     }
 
-    /// Register configured roots, start the watcher and the lazy WebP conversion of imported covers.
+    /// Register configured roots, start the watcher, the Bandcamp-links file sync and the lazy WebP
+    /// conversion of imported covers.
     /// Nothing here blocks startup (the server is accepting connections immediately).
     pub async fn start(&self) {
         let ctx = self.ctx.clone();
         let _ = tokio::task::spawn_blocking(move || bc_scan::roots::ensure_roots(&ctx)).await;
         *self.watcher.lock() = Some(bc_scan::watcher::Watcher::start(&self.ctx));
+        crate::ledger::spawn(self.ctx.clone());
         let pending: i64 = self
             .ctx
             .read_async(|c| Ok(c.query_row("SELECT COUNT(*) FROM artwork WHERE source = 'legacy' AND sizes = 0", [], |r| r.get(0))?))
