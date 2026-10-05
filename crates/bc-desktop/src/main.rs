@@ -14,7 +14,7 @@
 //!   server. `bc-desktop --quit` stops it.
 //! * Closing the window quits, unless music is playing; then it keeps playing in the background.
 //!   Reopen via the dock icon or the tray.
-//! * Shows notifications when downloads finish.
+//! * Shows notifications when downloads finish (macOS only; Linux stays quiet).
 //! * Signs in to Bandcamp: Settings asks for a window on Bandcamp's own login page (a WKWebView
 //!   window on macOS, a throwaway browser profile on Linux, `login.rs`); once the page has set the
 //!   `identity` cookie it is stored like a pasted one and the window closes. bc never sees the
@@ -202,6 +202,7 @@ fn spawn_player_watch(core: Arc<Core>) {
 }
 
 /// Notify when a download job settles (watches the same event bus the UI uses).
+#[cfg(target_os = "macos")]
 fn spawn_notifier(server: Arc<RunningServer>) {
     let mut rx = server.state.bus.subscribe();
     tokio::spawn(async move {
@@ -282,6 +283,7 @@ fn main() -> anyhow::Result<()> {
 
         let core = Arc::new(Core { url, server: server.clone(), player: Mutex::new((PlayerStatus::Idle, false)) });
         spawn_player_watch(core.clone());
+        #[cfg(target_os = "macos")]
         spawn_notifier(server);
         anyhow::Ok(core)
     })?;

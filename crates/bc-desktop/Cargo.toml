@@ -1,6 +1,6 @@
 [package]
 name = "bc-desktop"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 description = "bc desktop app: in-process bc-server + audio engine, UI in a browser app window (Linux) or a native web view window (macOS), single instance."
 
@@ -12,7 +12,6 @@ anyhow = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal", "macros"] }
 tracing = "0.1"
-notify-rust = "4"
 libc = "0.2"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
@@ -23,6 +22,7 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 rusty-leveldb = "4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+notify-rust = "4"
 muda = "0.21"
 tao = "0.37"
 wry = "0.57"

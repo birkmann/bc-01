@@ -1,6 +1,6 @@
 [package]
 name = "bc-recommend"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 description = "Recommenders (suggest-next, loved, similar), DJ-set pool/suggest/automix and similar playlists."
 
