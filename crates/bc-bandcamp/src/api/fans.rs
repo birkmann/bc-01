@@ -129,21 +129,22 @@ fn peek_items(c: &bc_db::rusqlite::Connection, rows: &[HarvestedRelease]) -> Res
     // thing a stranger's list is read for.
     let urls: Vec<String> = rows.iter().map(|r| r.url.clone()).collect();
     let names: NameLookup = rows.iter().map(|r| (r.url.clone(), (r.artist_name.clone(), r.title.clone()))).collect();
-    let known = dedup::find_known(c, &urls, Some(&names)).map_err(|e| HarvestError::other(e.to_string()))?;
+    let known = dedup::find_known_ids(c, &urls, Some(&names)).map_err(|e| HarvestError::other(e.to_string()))?;
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for r in rows {
         if !seen.insert(r.url.clone()) {
             continue;
         }
-        let reason = known.get(&dedup::url_key(&r.url));
+        let hit = known.get(&dedup::url_key(&r.url)).filter(|(reason, _)| reason != "blacklist");
         out.push(PeekItem {
             url: r.url.clone(),
             title: r.title.clone(),
             artist_name: r.artist_name.clone(),
             art_url: r.art_url.clone(),
             item_type: r.item_type.clone(),
-            in_library: reason.is_some_and(|x| x != "blacklist"),
+            in_library: hit.is_some(),
+            library_release_id: hit.and_then(|(_, id)| *id),
         });
     }
     Ok(out)

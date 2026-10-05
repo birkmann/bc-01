@@ -565,6 +565,9 @@ pub struct PeekItem {
     pub item_type: String,
     #[serde(default)]
     pub in_library: bool,
+    /// The library row to play instead of streaming, where matching named one.
+    #[serde(default)]
+    pub library_release_id: Option<i64>,
 }
 fn d_album() -> String {
     "album".into()

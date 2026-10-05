@@ -32,7 +32,8 @@ mod related;
 /// `BandcampSearchShelf` / `BandcampPagePicker` are exported for the library screens (Tracks search miss, artist/label pinning).
 #[allow(dead_code)]
 pub(crate) mod search;
-mod supporters;
+/// `FanPeekPanel` is shared with the album page's own "Supported by".
+pub(crate) mod supporters;
 mod vgrid;
 
 use cards::{CatalogDownloadButton, FileUnder, FollowBandButton, GridPlaybackBar, ReleaseCardView, Selecting, SelectionBar};

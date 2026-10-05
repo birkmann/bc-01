@@ -1,22 +1,18 @@
 //! "Supported by": who else bought this record on Bandcamp, straight off the
-//! record's own page. A fan can be peeked at (collection / wishlist) and followed.
-use bc_types::bandcamp::{AddFanRequest, CollectorOut, CollectorsOut, FanOut, FanPeekOut, FanPeekPageOut, PeekItem};
+//! record's own page. A fan can be peeked at (collection / wishlist), played from right
+//! there like the library's own grid, and followed. The peek panel is Explore's.
+use bc_types::bandcamp::{CollectorOut, CollectorsOut};
 use leptos::prelude::*;
-use leptos::task::spawn_local;
-use leptos_router::hooks::use_navigate;
 
-use super::related::release_path;
-use crate::api;
 use crate::data::{QuerySpec, use_query};
-use crate::ds::{Button, Icon, Variant, toast_err};
+use crate::ds::Icon;
 use crate::logic::format::format_count;
+use crate::pages::explore::supporters::FanPeekPanel;
 use crate::util::{enc, ls_get, ls_set};
-use crate::widgets::common::Art;
 
 const FIRST: i64 = 80;
 const STEP: i64 = 160;
 const OPEN_KEY: &str = "bc:supporters:open:v1";
-const PEEK_PAGE: i64 = 60;
 
 #[component]
 fn Avatar(name: String, image: Option<String>) -> impl IntoView {
@@ -105,149 +101,9 @@ pub fn Supporters(url: String) -> impl IntoView {
                             })}
                         }
                     })}
-                    {move || peeking.get().map(|f| view! { <FanPeek fan=f on_close=Callback::new(move |_| peeking.set(None)) /> })}
+                    {move || peeking.get().map(|f| view! { <FanPeekPanel fan=f on_close=Callback::new(move |_| peeking.set(None)) /> })}
                 </div>
             })}
         </section>
-    }
-}
-
-#[component]
-fn FanPeek(fan: CollectorOut, on_close: Callback<()>) -> impl IntoView {
-    let navigate = use_navigate();
-    let which = RwSignal::new("collection".to_string());
-    let furl = fan.url.clone();
-    let peek = use_query::<FanPeekOut>(move || Some(QuerySpec::new(format!("/fans/peek?url={}", enc(&furl)), &[])));
-    let busy = RwSignal::new(false);
-    let followed = Memo::new({
-        let base = fan.followed_id;
-        move |_| peek.data.get().and_then(|p| p.followed_id).or(base)
-    });
-    let follow = {
-        let url = fan.url.clone();
-        move || {
-            busy.set(true);
-            let (url, nav) = (url.clone(), navigate.clone());
-            spawn_local(async move {
-                match api::post::<_, FanOut>("/fans", &AddFanRequest { url, walk: true }).await {
-                    Ok(f) => {
-                        crate::data::invalidate_entity("fan", &[]);
-                        nav(&format!("/fans/{}", f.id), Default::default());
-                    }
-                    Err(e) => toast_err(&e.message()),
-                }
-                busy.set(false);
-            });
-        }
-    };
-    let follow = std::sync::Arc::new(follow);
-    let name = fan.name.clone();
-    let img = fan.image_url.clone();
-    let page_url = fan.url.clone();
-    view! {
-        <div class="lib-peek">
-            <div class="row lib-peek-head">
-                <span class="lib-avatar big"><Avatar name=name.clone() image=img /></span>
-                <div class="grow">
-                    <div class="lib-peek-name">
-                        {move || peek.data.get().map(|p| p.display_name.clone()).unwrap_or_else(|| name.clone())}
-                        <a href=page_url.clone() target="_blank" rel="noreferrer" class="faint" title="Open their Bandcamp page"><Icon name="external" size=12 /></a>
-                    </div>
-                    <div class="faint lib-peek-sub">
-                        {move || match (peek.data.get(), peek.error.get()) {
-                            (Some(p), _) => format!("@{}", p.username),
-                            (None, Some(e)) => e.message(),
-                            _ => "Reading their page…".into(),
-                        }}
-                    </div>
-                </div>
-                {move || match followed.get() {
-                    Some(id) => view! { <a class="btn btn-primary btn-sm" href=format!("/fans/{id}")><Icon name="users" size=12 />"Open in Fans"</a> }.into_any(),
-                    None => { let f = follow.clone(); view! {
-                        <Button variant=Variant::Primary icon="plus" busy=busy title="Follow this fan: their collection and wishlist get walked in and appear on the Fans page." on_click=move |_| f()>"Follow & open"</Button>
-                    }.into_any() }
-                }}
-                <Button variant=Variant::Ghost icon="x" title="Close" on_click=move |_| on_close.run(()) />
-            </div>
-            {move || peek.data.get().map(|p| {
-                let (cc, wc) = (p.collection_count, p.wishlist_count);
-                let (url, id) = (fan.url.clone(), p.bc_fan_id);
-                view! {
-                    <div class="lib-peek-tabs">
-                        <button type="button" class="lib-pill" class:on=move || which.get() == "collection" on:click=move |_| which.set("collection".into())><Icon name="disc" size=11 />"Collection "<span class="mono">{format_count(cc)}</span></button>
-                        <button type="button" class="lib-pill" class:on=move || which.get() == "wishlist" on:click=move |_| which.set("wishlist".into())><Icon name="heart" size=11 />"Wishlist "<span class="mono">{format_count(wc)}</span></button>
-                    </div>
-                    {move || {
-                        let w = which.get();
-                        let total = if w == "collection" { cc } else { wc };
-                        view! { <PeekList url=url.clone() fan_id=id which=w total=total /> }
-                    }}
-                }
-            })}
-        </div>
-    }
-}
-
-#[component]
-fn PeekList(url: String, fan_id: Option<i64>, which: String, total: i64) -> impl IntoView {
-    let items = RwSignal::new(Vec::<PeekItem>::new());
-    let cursor = RwSignal::new(None::<String>);
-    let more = RwSignal::new(total > 0);
-    let busy = RwSignal::new(false);
-    let error = RwSignal::new(None::<String>);
-    let load = {
-        let (url, which) = (url.clone(), which.clone());
-        move || {
-            if busy.get_untracked() || !more.get_untracked() {
-                return;
-            }
-            busy.set(true);
-            let mut q = format!("/fans/peek/items?url={}&which={}&count={PEEK_PAGE}", enc(&url), which);
-            if let Some(c) = cursor.get_untracked() {
-                q.push_str(&format!("&cursor={}", enc(&c)));
-            }
-            if let Some(f) = fan_id {
-                q.push_str(&format!("&fan_id={f}"));
-            }
-            spawn_local(async move {
-                match api::get::<FanPeekPageOut>(&q).await {
-                    Ok(p) => {
-                        items.update(|v| {
-                            for i in p.items {
-                                if !v.iter().any(|x| x.url == i.url) {
-                                    v.push(i);
-                                }
-                            }
-                        });
-                        more.set(p.more && p.cursor.is_some());
-                        cursor.set(p.cursor);
-                    }
-                    Err(e) => {
-                        error.set(Some(e.message()));
-                        more.set(false);
-                    }
-                }
-                busy.set(false);
-            });
-        }
-    };
-    let load = std::sync::Arc::new(load);
-    {
-        let l = load.clone();
-        Effect::new(move |_| l());
-    }
-    view! {
-        {(total == 0).then(|| view! { <p class="faint">"Nothing on this list."</p> })}
-        {move || error.get().map(|e| view! { <p class="danger-text">{e}</p> })}
-        <div class="lib-peek-grid">
-            {move || items.get().into_iter().map(|i| view! {
-                <a class="lib-peek-item" href=release_path(&i.url) title=format!("{} - {}", i.artist_name, i.title)>
-                    <Art src=i.art_url.clone() class="alb-art" />
-                    <span class="truncate lib-peek-title">{i.title.clone()}</span>
-                    <span class="truncate faint lib-peek-artist">{i.artist_name.clone()}{i.in_library.then_some(" · owned")}</span>
-                </a>
-            }).collect_view()}
-        </div>
-        {move || more.get().then(|| { let l = load.clone(); view! { <Button size=crate::ds::Size::Sm busy=busy on_click=move |_| l()>"Load more"</Button> } })}
     }
 }

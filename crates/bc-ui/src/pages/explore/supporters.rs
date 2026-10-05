@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
 
-use super::cards::ReleaseGrid;
+use super::cards::{GridPlaybackBar, ReleaseGrid};
 use crate::api;
 use super::qh;
 use crate::data::{self, QuerySpec};
@@ -130,7 +130,7 @@ fn peek_card(i: &PeekItem) -> ReleaseCardOut {
         is_free_download: false,
         in_library: i.in_library,
         blacklisted: false,
-        library_release_id: None,
+        library_release_id: i.library_release_id,
     }
 }
 
@@ -220,6 +220,8 @@ pub fn FanPeekPanel(fan: CollectorOut, on_close: Callback<()>) -> impl IntoView 
 
 /// One of a fan's lists, newest first, as far down as the reader scrolls. It scrolls in its
 /// own box so opening someone with three hundred records does not bury the rest of the page.
+/// Every cover plays on its own, and Play all / Shuffle sweep what has been read so far,
+/// the library's own copy standing in wherever the shelf already has the record.
 #[component]
 fn PeekList(fan: CollectorOut, fan_id: Option<i64>, which: String, total: i64) -> impl IntoView {
     let items = RwSignal::new(Vec::<ReleaseCardOut>::new());
@@ -283,7 +285,9 @@ fn PeekList(fan: CollectorOut, fan_id: Option<i64>, which: String, total: i64) -
         }
     };
     let load2 = load.clone();
+    let sweep = Signal::derive(move || items.with(|v| v.iter().map(|c| (c.url.clone(), c.library_release_id)).collect::<Vec<_>>()));
     view! {
+        {(total > 0).then(|| view! { <GridPlaybackBar items=sweep noun="records" /> })}
         <div class="peek-list" node_ref=box_ref on:scroll=on_scroll>
             {(total == 0).then(|| view! { <p class="faint">"Nothing on this list."</p> })}
             <ReleaseGrid items=items min=130 />

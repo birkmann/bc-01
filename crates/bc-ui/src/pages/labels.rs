@@ -201,29 +201,32 @@ pub fn LabelsPage() -> impl IntoView {
     let sweep_running = sweep.running();
     let resolve_running = resolve.running();
     let relink_running = relink.running();
-    let sweep_busy = Signal::derive(move || sweep_running.get() || sweep.starting.get());
-    let sweep_label = Signal::derive(move || {
-        let n = n_picked.get();
-        if n > 0 { format!("Find & download {} selected", format_count(n as i64)) } else { "Find & download new".to_string() }
-    });
     let sort_options = Signal::derive(|| lg::LABEL_SORTS.iter().map(|s| SelectOption::new(s.value, s.label)).collect::<Vec<_>>());
 
+    // Sweeping queues downloads in bulk, so it sits behind a confirmation.
+    let start_sweep = move || {
+        let ids: Vec<i64> = picked.get_untracked().into_iter().collect();
+        let body = if ids.is_empty() {
+            let n = total.get_untracked().unwrap_or(0);
+            format!("Every label's Bandcamp page ({} labels) is checked for new releases, and everything found is queued for download. This can add a lot of downloads and take a while.", format_count(n as i64))
+        } else {
+            format!("The Bandcamp pages of the {} selected labels are checked for new releases, and everything found is queued for download.", format_count(ids.len() as i64))
+        };
+        spawn_local(async move {
+            if crate::ds::confirm("Find & download new releases?", &body, "Find & download", true).await {
+                sweep.start(ids);
+            }
+        });
+    };
     let overflow = Callback::new(move |_| -> Vec<MenuEntry> {
+        let n = n_picked.get_untracked();
+        let sweep_label = if n > 0 { format!("Find & download {} selected\u{2026}", format_count(n as i64)) } else { "Find & download new\u{2026}".to_string() };
+        let sweep_busy = sweep_running.get_untracked() || sweep.starting.get_untracked();
         vec![
+            MenuItem::new(sweep_label).icon("rss").disabled(sweep_busy).on(start_sweep).into(),
             MenuItem::new("Find missing labels").icon("tag").disabled(resolve_running.get_untracked()).on(move || resolve.start()).into(),
             MenuItem::new("Link library to Bandcamp").icon("link").disabled(relink_running.get_untracked()).on(move || relink.start()).into(),
         ]
-    });
-    let start_sweep = move |_| {
-        let ids: Vec<i64> = picked.get_untracked().into_iter().collect();
-        sweep.start(ids);
-    };
-    let sweep_title = Signal::derive(move || {
-        if n_picked.get() > 0 {
-            "Check the selected labels' Bandcamp pages for new releases and download them".to_string()
-        } else {
-            "Check every label's Bandcamp page for new releases and queue them all for download".to_string()
-        }
     });
     let sweep_line = sweep.line();
     let resolve_line = resolve.line();
@@ -237,14 +240,6 @@ pub fn LabelsPage() -> impl IntoView {
                         title="Play the shelf from the top, folder after folder"><span class="hide-sm">"Play all"</span></Button>
                     <Button icon="shuffle" on_click=move |_| play_shelf(true)
                         title="Shuffle every folder together: a share from each label"><span class="hide-sm">"Shuffle all"</span></Button>
-                    {move || {
-                        let variant = if n_picked.get() > 0 { Variant::Primary } else { Variant::Outline };
-                        view! {
-                            <Button variant=variant icon="rss" busy=sweep_busy on_click=start_sweep title=sweep_title.get() class="pp-sweep-btn">
-                                <span class="hide-sm">{move || sweep_label.get()}</span>
-                            </Button>
-                        }
-                    }}
                 }) />
             <div class="pp-toolbar">
                 <SearchInput value=filter placeholder="Filter labels\u{2026}" class="pp-search" />

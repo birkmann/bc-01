@@ -230,6 +230,7 @@ a.xg-artist:hover { color: var(--color-accent); }
 .peek-tabs { display: flex; gap: 6px; margin: 12px 0 8px; }
 .peek-tabs .chip { height: 28px; }
 .peek-tabs .display { font-size: var(--text-2xs); letter-spacing: .1em; text-transform: uppercase; }
+.peek .xg-bar { margin-bottom: 10px; }
 .peek-list { max-height: 62vh; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
 .peek-foot { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 0 4px; font-size: var(--text-2xs); }
 
