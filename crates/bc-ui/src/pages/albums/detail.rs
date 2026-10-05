@@ -90,6 +90,13 @@ pub fn AlbumDetailPage() -> impl IntoView {
         vec![TabDef::new("local", "In your library"), TabDef::new("explore", "On Bandcamp")]
     });
 
+    // The release refetches on every download/analysis event; these keep the stateful blocks below
+    // (an open fan peek, the Bandcamp shelves) mounted unless what they show actually changed.
+    let bandcamp_url = Memo::new(move |_| rel_data.with(|r| r.as_ref().and_then(|r| r.bandcamp_url.clone())));
+    let shelves_key = Memo::new(move |_| {
+        rel_data.with(|r| r.as_ref().map(|r| (r.id, r.bandcamp_url.clone(), r.title.clone(), r.artist.as_ref().map(|a| a.name.clone()))))
+    });
+
     let items = Memo::new(move |_| trk_data.get().map(|p| p.page.items.clone()).unwrap_or_default());
     let source = move || QueueSource::Release { release_id: id.get_untracked(), listing: library_listing() };
     let play_from = Arc::new(move |from: usize| {
@@ -290,7 +297,7 @@ pub fn AlbumDetailPage() -> impl IntoView {
                     })}
                 </section>
 
-                {move || rel_data.get().and_then(|r| r.bandcamp_url.clone()).map(|u| view! { <div class="lib-block"><Supporters url=u /></div> })}
+                {move || bandcamp_url.get().map(|u| view! { <div class="lib-block"><Supporters url=u /></div> })}
 
                 <div class="lib-block">
                     <Tabs tabs=tabs value=tab />
@@ -301,7 +308,8 @@ pub fn AlbumDetailPage() -> impl IntoView {
                             _ => view! { <p class="faint lib-note">"Nothing else in your library sits near this one."</p> }.into_any(),
                         }
                     } else {
-                        match rel_data.get() {
+                        shelves_key.track();
+                        match rel_data.get_untracked() {
                             Some(r) => view! { <BandcampShelves release=(*r).clone() /> }.into_any(),
                             None => ().into_any(),
                         }
