@@ -53,7 +53,8 @@
 .pp-card-badges .badge { background: color-mix(in srgb, var(--color-surface-1) 82%, transparent); backdrop-filter: blur(6px); }
 .pp-card-badges .badge-ok { color: var(--color-ok); }
 .pp-card-badges .badge-accent { color: var(--color-accent); }
-.pp-card-act { position: absolute; right: 6px; bottom: 6px; z-index: 3; }
+/* Two classes so it beats .pp-chipbtn's `position: relative` further down. */
+.pp-card-art .pp-card-act { position: absolute; right: 6px; bottom: 6px; z-index: 3; }
 /* Bandcamp cards: download chip + play (streams when missing, library files when owned). */
 .pp-bc-acts { position: absolute; right: 6px; bottom: 6px; z-index: 3; display: flex; gap: 6px; align-items: center; }
 .pp-bc-acts .xc-play { position: static; width: 34px; height: 34px; }
@@ -61,7 +62,8 @@
 @media (pointer: coarse) { .pp-bc-acts .xc-play { width: 40px; height: 40px; } }
 .pp-cover { position: absolute; inset: 0; background: var(--color-surface-3); overflow: hidden; }
 .pp-cover.pp-round { border-radius: 50%; }
-.pp-cover img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--dur-slow) var(--ease); display: block; }
+/* Positioned so a loaded cover paints over the absolute placeholder. */
+.pp-cover img { position: relative; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--dur-slow) var(--ease); display: block; }
 .pp-cover img.loaded { opacity: 1; }
 .pp-cover-ph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--color-ink-faint); }
 .pp-cover-ph .icon { width: 30%; height: 30%; stroke-width: 1.25; }
