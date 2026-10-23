@@ -313,9 +313,10 @@ pub fn run(rt: tokio::runtime::Runtime, core: Arc<Core>) -> anyhow::Result<()> {
                 if login.is_some() {
                     let _ = proxy.send_event(UserEvent::LoginCheck);
                 }
-                // Window closed: keep playing in the background; once nothing has played for a
-                // while (or right away if nothing was playing when it closed), quit.
-                if window.is_visible() || core.playing() {
+                // Window closed: keep playing (and moving, scanning) in the background; once
+                // nothing has played for a while (or right away if nothing was playing when it
+                // closed), quit.
+                if window.is_visible() || core.playing() || core.busy() {
                     idle_s = 0;
                 } else {
                     idle_s += 2;

@@ -846,6 +846,13 @@ pub struct MovePlanOut {
     pub ok: bool,
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The target is (inside) another root, `merge_into` its path: the files join that root and
+    /// this one keeps its path (a downloads root keeps receiving new downloads).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_into: Option<String>,
+    /// Files whose destination path another root's file already has. They are left where they are.
+    #[serde(default)]
+    pub conflicts: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -856,6 +863,28 @@ pub struct MoveResult {
     #[serde(default)]
     pub errors: Vec<String>,
     pub new_path: String,
+    /// Files left where they were because the destination already holds a different file
+    /// (first 50).
+    #[serde(default)]
+    pub conflicts: Vec<String>,
+    #[serde(default)]
+    pub outcome: MoveOutcome,
+}
+
+/// How a move ended.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveOutcome {
+    /// Every file is at the target (or was missing to begin with) and the root points there.
+    #[default]
+    Complete,
+    /// Some files could not move (see `errors` / `conflicts`); the root was not repointed.
+    /// Running the move again picks up where this one stopped.
+    Incomplete,
+    /// Stopped by the user. Everything moved so far is consistent; running it again resumes.
+    Cancelled,
+    /// Stopped by an error before the end; resumes at the next start.
+    Failed,
 }
 
 // ======================================================================================
@@ -1049,12 +1078,23 @@ pub struct ScanProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MoveProgress {
+    /// The move task; a client ignores every other job's events.
+    #[serde(default)]
+    pub job_id: String,
     pub root_id: i64,
+    #[serde(default)]
+    pub target: String,
+    /// Files processed so far (moved, already there, missing or skipped). Never goes down.
     pub moved: i64,
     pub total: i64,
     pub bytes_moved: i64,
     pub current: Option<String>,
     pub done: bool,
+    /// Set on the last event (`done`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<MoveOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

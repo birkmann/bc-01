@@ -52,6 +52,8 @@ impl LibraryService {
     pub async fn start(&self) {
         let ctx = self.ctx.clone();
         let _ = tokio::task::spawn_blocking(move || bc_scan::roots::ensure_roots(&ctx)).await;
+        // Before the watcher: the resumed moves hold their roots, so it leaves them alone.
+        bc_maint::routes::resume_moves(&self.ctx).await;
         *self.watcher.lock() = Some(bc_scan::watcher::Watcher::start(&self.ctx));
         crate::ledger::spawn(self.ctx.clone());
         let ctx = self.ctx.clone();

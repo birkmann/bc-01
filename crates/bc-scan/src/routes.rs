@@ -91,6 +91,11 @@ pub async fn spawn_scan(ctx: &Ctx, root_id: Option<i64>) -> ApiResult<String> {
     {
         return Err(ApiError::not_found(format!("root {id} not found")));
     }
+    if let Some(id) = root_id
+        && bc_libcore::root_lock::holder(&ctx.db, id) == Some("move")
+    {
+        return Err(ApiError::conflict("this folder is being moved; it is scanned when the move is done"));
+    }
     let label = match root_id {
         Some(id) => format!("scan root {id}"),
         None => "scan all roots".to_string(),
@@ -158,6 +163,15 @@ fn scan_roots(ctx: &Ctx, handle: &bc_libcore::JobHandle, ids: Vec<i64>, cancel: 
         if cancel.load(Ordering::Relaxed) || handle.cancelled() {
             break;
         }
+        // A root being moved is half here, half there: scanning it now would mark the moved half
+        // missing. The move keeps every row it touches up to date, so skipping loses nothing.
+        let _guard = match bc_libcore::root_lock::try_lock(&ctx.db, &[id], "scan") {
+            Ok(g) => g,
+            Err((_, holder)) => {
+                tracing::info!(root_id = id, holder, "root busy, not scanned");
+                continue;
+            }
+        };
         let mut last = Instant::now() - Duration::from_secs(1);
         // When this root's files started going in (the walk has no total) and how many were in.
         let mut base: Option<(Instant, i64)> = None;

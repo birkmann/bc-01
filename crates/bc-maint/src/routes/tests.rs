@@ -722,3 +722,78 @@ async fn move_is_a_tracked_task_that_publishes_progress() {
     assert_eq!((last["done"].clone(), last["moved"].as_i64(), last["root_id"].as_i64()), (json!(true), Some(3), Some(root)));
     assert_eq!(progress[0]["moved"], 1, "the first file is always reported");
 }
+
+/// A root at `<tmp>/old/music` with three files, and an existing parent for `<tmp>/new/music`.
+fn move_fixture(env: &TestEnv) -> (std::path::PathBuf, i64, std::path::PathBuf) {
+    let old = env.dir.path().join("old").join("music");
+    std::fs::create_dir_all(old.join("A/B")).unwrap();
+    let root = seed_root(&env.db, old.to_str().unwrap(), "downloads");
+    let rid = seed_release(&env.db, "A", "B", None, None);
+    for n in 1..=3 {
+        let rel = format!("A/B/0{n} - t.mp3");
+        std::fs::write(old.join(&rel), vec![1u8; 100]).unwrap();
+        let t = seed_track(&env.db, rid, &format!("t{n}"), Some(n));
+        seed_file(&env.db, t, root, old.join(&rel).to_str().unwrap(), &rel, 100);
+    }
+    std::fs::create_dir_all(env.dir.path().join("new")).unwrap();
+    (old, root, env.dir.path().join("new").join("music"))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_root_already_being_moved_refuses_a_second_move() {
+    let env = test_env();
+    let (old, root, target) = move_fixture(&env);
+    let app = app(&env, false);
+    // Stand in for a move in flight.
+    let held = bc_libcore::root_lock::try_lock(&env.db, &[root], "move").unwrap();
+    let (st, body) = call(&app, "POST", &format!("/library/roots/{root}/move"), Some(json!({"target_path": target}))).await;
+    assert_eq!(st, 409, "{body}");
+    assert!(body["detail"].as_str().unwrap().contains("already being moved"));
+    assert_eq!(q_i64(&env.db, "SELECT COUNT(*) FROM root_moves"), 0, "a refused move records nothing");
+    drop(held);
+    assert!(old.join("A/B/01 - t.mp3").is_file());
+    assert_eq!(call(&app, "POST", &format!("/library/roots/{root}/move/cancel"), None).await.0, 404, "nothing to stop");
+    let (_, moves) = call(&app, "GET", "/library/moves", None).await;
+    assert_eq!(moves, json!([]));
+
+    let (st, accepted) = call(&app, "POST", &format!("/library/roots/{root}/move"), Some(json!({"target_path": target}))).await;
+    assert_eq!(st, 202);
+    let task = wait_task(&env, accepted["job_id"].as_str().unwrap()).await;
+    assert_eq!(task.result.unwrap()["outcome"], "complete");
+    assert_eq!(q_i64(&env.db, "SELECT COUNT(*) FROM root_moves"), 0, "a finished move is not resumed");
+    assert!(bc_libcore::root_lock::try_lock(&env.db, &[root], "scan").is_ok(), "the root is released");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_move_resumes_at_start() {
+    let env = test_env();
+    let (old, root, target) = move_fixture(&env);
+    // As a quit mid-move leaves it: one file across, its row updated, the move still recorded.
+    std::fs::create_dir_all(target.join("A/B")).unwrap();
+    std::fs::rename(old.join("A/B/01 - t.mp3"), target.join("A/B/01 - t.mp3")).unwrap();
+    exec(&env.db, &format!("UPDATE files SET path = '{}' WHERE rel_path = 'A/B/01 - t.mp3'", target.join("A/B/01 - t.mp3").display()));
+    exec(&env.db, &format!("INSERT INTO root_moves(root_id, target) VALUES ({root}, '{}')", target.display()));
+    let mut rx = env.bus.subscribe();
+
+    crate::routes::resume_moves(&env).await;
+    let mut last = None;
+    for _ in 0..400 {
+        while let Ok(ev) = rx.try_recv() {
+            if ev.topic == "library.move.progress" && ev.payload["done"] == true {
+                last = Some(ev.payload);
+            }
+        }
+        if last.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    let last = last.expect("the resumed move finishes");
+    assert_eq!((last["outcome"].as_str(), last["root_id"].as_i64()), (Some("complete"), Some(root)));
+    assert!(!last["job_id"].as_str().unwrap().is_empty(), "events carry their job");
+    assert_eq!(q_str(&env.db, &format!("SELECT path FROM library_roots WHERE id={root}")).unwrap(), target.to_str().unwrap());
+    for n in 1..=3 {
+        assert!(target.join(format!("A/B/0{n} - t.mp3")).is_file());
+    }
+    assert_eq!(q_i64(&env.db, "SELECT COUNT(*) FROM root_moves"), 0);
+}

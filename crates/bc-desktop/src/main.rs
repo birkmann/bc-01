@@ -110,6 +110,11 @@ impl Core {
         self.player.lock().unwrap_or_else(|e| e.into_inner()).1
     }
 
+    /// Library work (a move, a scan) is running: closing the window must not quit under it.
+    fn busy(&self) -> bool {
+        !self.server.state.services.busy().is_empty()
+    }
+
     fn player_cmd(&self, cmd: serde_json::Value) {
         let server = self.server.clone();
         tokio::spawn(async move {

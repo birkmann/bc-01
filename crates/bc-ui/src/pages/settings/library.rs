@@ -1,6 +1,7 @@
 //! Settings > Library: stats, roots (add / enable / watch / scan / move), library
 //! scope, snippet filter. Scan and move progress arrive over WS and are patched in
-//! place (no refetch on progress ticks).
+//! place (no refetch on progress ticks). A move runs on the server whether or not its
+//! dialog is open; its progress shows on the root's row and the dialog picks it up again.
 use std::collections::BTreeMap;
 
 use bc_types::Accepted;
@@ -12,7 +13,7 @@ use super::common::{Notice, Stat, SysCard, QueryError, qh};
 use super::logic::split_warnings;
 use crate::api;
 use crate::data::{QuerySpec, use_query, use_topic};
-use crate::ds::{Badge, Button, Dialog, Icon, Meter, Select, SelectOption, Size, Skeleton, Switch, Tone, Variant, toast_err, toast_ok};
+use crate::ds::{Badge, Button, Dialog, Icon, Meter, Select, SelectOption, Size, Skeleton, Switch, Tone, Variant, toast_err, toast_ok, toast_warn};
 use crate::logic::format::{format_bytes, format_count, format_long_duration};
 use crate::widgets::FolderPicker;
 
@@ -25,6 +26,45 @@ pub fn LibrarySection() -> impl IntoView {
     let move_root = RwSignal::new(None::<RootOut>);
     let move_open = RwSignal::new(false);
     let stopping = RwSignal::new(false);
+    // running moves by root, and the report of the last one that left files behind
+    let moves = RwSignal::new(BTreeMap::<i64, MoveProgress>::new());
+    let move_report = RwSignal::new(None::<MoveResult>);
+
+    spawn_local(async move {
+        if let Ok(list) = api::get::<Vec<MoveProgress>>("/library/moves").await {
+            moves.set(list.into_iter().map(|p| (p.root_id, p)).collect());
+        }
+    });
+    use_topic::<MoveProgress>("library.move.progress", move |p| {
+        if !p.done {
+            moves.update(|m| {
+                // one job per root; within a job the count only grows (a stale tick is dropped)
+                let stale = m.get(&p.root_id).is_some_and(|cur| cur.job_id == p.job_id && cur.moved > p.moved);
+                if !stale {
+                    m.insert(p.root_id, p);
+                }
+            });
+            return;
+        }
+        moves.update(|m| {
+            m.remove(&p.root_id);
+        });
+        stats.refetch();
+        match p.outcome.unwrap_or_default() {
+            MoveOutcome::Complete => toast_ok(&format!("Moved {} files", format_count(p.moved))),
+            MoveOutcome::Cancelled => toast_ok(&format!("Move stopped after {} of {} files. Move again to finish it.", format_count(p.moved), format_count(p.total))),
+            MoveOutcome::Failed => toast_err(&format!("Move stopped: {}. It resumes at the next start.", p.error.clone().unwrap_or_default())),
+            MoveOutcome::Incomplete => toast_warn("Move finished, but some files were left where they were"),
+        }
+        let job = p.job_id.clone();
+        spawn_local(async move {
+            if let Ok(t) = api::get::<serde_json::Value>(&format!("/library/tasks/{job}")).await
+                && let Some(r) = t.get("result").and_then(|r| serde_json::from_value::<MoveResult>(r.clone()).ok())
+            {
+                move_report.set((!r.conflicts.is_empty() || !r.errors.is_empty()).then_some(r));
+            }
+        });
+    });
 
     use_topic::<ScanProgress>("library.scan.progress", move |p| {
         progress.update(|m| {
@@ -124,12 +164,13 @@ pub fn LibrarySection() -> impl IntoView {
             <Show when=move || stats.data.get().is_none() && stats.error.get().is_none()><Skeleton height="64px" /></Show>
             <div class="root-list">
                 <For each=move || stats.data.get().map(|s| s.roots.clone()).unwrap_or_default() key=|r| (r.id, r.track_count, r.last_scan_at.clone()) let:root>
-                    <RootRow root=root progress=progress scanning=scanning
+                    <RootRow root=root progress=progress scanning=scanning moves=moves
                         on_scan=Callback::new(move |id| start_scan(Some(id)))
                         on_move=Callback::new(move |r: RootOut| { move_root.set(Some(r)); move_open.set(true); }) />
                 </For>
             </div>
             <AddRoot on_added=Callback::new(move |_| stats.refetch()) />
+            {move || move_report.get().map(|r| view! { <MoveReport r=r on_dismiss=Callback::new(move |_| move_report.set(None)) /> })}
             <Show when=move || !last_scan.get().is_empty()>
                 <div class="scan-results" aria-live="polite">
                     <For each=move || last_scan.get() key=|r| r.root_id let:r>
@@ -147,13 +188,20 @@ pub fn LibrarySection() -> impl IntoView {
             </Show>
         </SysCard>
 
-        <MoveRootDialog root=move_root open=move_open on_done=Callback::new(move |_| stats.refetch()) />
+        <MoveRootDialog root=move_root open=move_open moves=moves />
         <ScopeCards />
     }
 }
 
 #[component]
-fn RootRow(root: RootOut, progress: RwSignal<BTreeMap<i64, ScanProgress>>, scanning: RwSignal<bool>, on_scan: Callback<i64>, on_move: Callback<RootOut>) -> impl IntoView {
+fn RootRow(
+    root: RootOut,
+    progress: RwSignal<BTreeMap<i64, ScanProgress>>,
+    scanning: RwSignal<bool>,
+    moves: RwSignal<BTreeMap<i64, MoveProgress>>,
+    on_scan: Callback<i64>,
+    on_move: Callback<RootOut>,
+) -> impl IntoView {
     let id = root.id;
     let enabled = RwSignal::new(root.enabled);
     let watch = RwSignal::new(root.watch);
@@ -166,6 +214,7 @@ fn RootRow(root: RootOut, progress: RwSignal<BTreeMap<i64, ScanProgress>>, scann
     };
     let prog = Signal::derive(move || progress.with(|m| m.get(&id).cloned()));
     let meter = Signal::derive(move || prog.get().and_then(|p| p.total.filter(|t| *t > 0).map(|t| p.seen as f64 / t as f64)));
+    let mv = Signal::derive(move || moves.with(|m| m.get(&id).cloned()));
     let r2 = root.clone();
     let sub = format!(
         "{} files{}",
@@ -186,6 +235,7 @@ fn RootRow(root: RootOut, progress: RwSignal<BTreeMap<i64, ScanProgress>>, scann
                         <span class="mono faint">{format!("{} {} {}", p.phase, format_count(p.seen), p.total.map(|t| format!("/ {}", format_count(t))).unwrap_or_default())}</span>
                     </div>
                 })}
+                {move || mv.get().map(|p| view! { <MoveMeter p=p /> })}
             </div>
             <div class="root-ctrls">
                 <label class="switch-label" title="Include in listings and scans">
@@ -196,8 +246,9 @@ fn RootRow(root: RootOut, progress: RwSignal<BTreeMap<i64, ScanProgress>>, scann
                     <Switch value=watch label="Watch for changes" on_change=Callback::new(move |v: bool| patch(RootPatch { watch: Some(v), ..Default::default() })) />
                     <span>"Watch"</span>
                 </label>
-                <Button size=Size::Sm icon="refresh" disabled=scanning on_click=move |_| on_scan.run(id)>"Scan"</Button>
-                <Button size=Size::Sm icon="hdd" title="Move this folder to another drive" on_click=move |_| on_move.run(r2.clone())>"Move"</Button>
+                <Button size=Size::Sm icon="refresh" disabled=Signal::derive(move || scanning.get() || mv.get().is_some()) on_click=move |_| on_scan.run(id)>"Scan"</Button>
+                <Button size=Size::Sm icon="hdd" title="Move this folder to another drive, or into another library folder"
+                    on_click=move |_| on_move.run(r2.clone())>{move || if mv.get().is_some() { "Moving" } else { "Move" }}</Button>
             </div>
         </div>
     }
@@ -245,35 +296,69 @@ fn AddRoot(on_added: Callback<()>) -> impl IntoView {
     }
 }
 
-/// Plan, then run, a move of a root to another folder or drive.
+/// A move's progress line: meter, counts, the file in hand.
 #[component]
-fn MoveRootDialog(root: RwSignal<Option<RootOut>>, open: RwSignal<bool>, on_done: Callback<()>) -> impl IntoView {
+fn MoveMeter(p: MoveProgress) -> impl IntoView {
+    let v = (p.total > 0).then(|| p.moved as f64 / p.total as f64);
+    view! {
+        <div class="root-progress" role="status">
+            <Meter value=v label="Move progress" />
+            <span class="mono faint">{format!("moving {} / {} files, {}", format_count(p.moved), format_count(p.total), format_bytes(p.bytes_moved as f64))}</span>
+            {p.current.map(|c| view! { <span class="mono faint truncate">{c}</span> })}
+        </div>
+    }
+}
+
+/// What the last move left behind, file by file.
+#[component]
+fn MoveReport(r: MoveResult, on_dismiss: Callback<()>) -> impl IntoView {
+    let left = r.conflicts.len() + r.errors.len();
+    view! {
+        <div class="scan-results" aria-live="polite">
+            <div class="scan-result">
+                <div class="row gap">
+                    <span class="grow">{format!("Last move: {} of {} files done; {} left where they were", format_count(r.moved - left as i64), format_count(r.total), left)}</span>
+                    <Button size=Size::Sm variant=Variant::Ghost icon="x" title="Dismiss" on_click=move |_| on_dismiss.run(()) />
+                </div>
+                {(!r.conflicts.is_empty()).then(|| view! {
+                    <p class="sys-hint faint">"Already in the library under the same name (nothing was overwritten):"</p>
+                })}
+                {r.conflicts.iter().map(|e| view! { <div class="sys-notice warn"><Icon name="alert" /><span class="truncate">{e.clone()}</span></div> }).collect_view()}
+                {r.errors.iter().map(|e| view! { <div class="sys-notice danger"><Icon name="x-circle" /><span class="truncate">{e.clone()}</span></div> }).collect_view()}
+            </div>
+        </div>
+    }
+}
+
+/// Plan, then run, a move of a root to another folder or drive, or into another root. Closing
+/// the dialog leaves the move running; reopening it shows the running move again.
+#[component]
+fn MoveRootDialog(root: RwSignal<Option<RootOut>>, open: RwSignal<bool>, moves: RwSignal<BTreeMap<i64, MoveProgress>>) -> impl IntoView {
     let target = RwSignal::new(String::new());
     let plan = RwSignal::new(None::<MovePlanOut>);
     let checking = RwSignal::new(false);
-    let moving = RwSignal::new(false);
-    let prog = RwSignal::new(None::<MoveProgress>);
+    let starting = RwSignal::new(false);
+    let stopping = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
+    let root_id = move || root.with(|r| r.as_ref().map(|r| r.id));
+    let active = Signal::derive(move || root_id().and_then(|id| moves.with(|m| m.get(&id).cloned())));
+    let moving = Signal::derive(move || active.get().is_some() || starting.get());
 
     Effect::new(move |_| {
-        if !open.get() && !moving.get_untracked() {
+        if !open.get() {
             plan.set(None);
             error.set(None);
-            prog.set(None);
+        } else if let Some(p) = active.get_untracked() {
+            target.set(p.target);
         }
     });
-    use_topic::<MoveProgress>("library.move.progress", move |p| {
-        let mine = root.with_untracked(|r| r.as_ref().map(|r| r.id)) == Some(p.root_id);
-        if !mine {
-            return;
-        }
-        let done = p.done;
-        prog.set(Some(p));
-        if done {
-            moving.set(false);
-            toast_ok("Root moved");
-            open.set(false);
-            on_done.run(());
+    // the move ended (any outcome): ready for another
+    Effect::new(move |_| {
+        if active.get().is_none() {
+            stopping.set(false);
+            plan.set(None);
+        } else {
+            starting.set(false);
         }
     });
 
@@ -297,21 +382,40 @@ fn MoveRootDialog(root: RwSignal<Option<RootOut>>, open: RwSignal<bool>, on_done
     let run = move |_| {
         let Some(id) = root.get_untracked().map(|r| r.id) else { return };
         let t = target.get_untracked().trim().to_string();
-        moving.set(true);
+        starting.set(true);
         error.set(None);
         spawn_local(async move {
-            if let Err(e) = api::post::<_, serde_json::Value>(&format!("/library/roots/{id}/move"), &MoveRequest { target_path: t, dry_run: false }).await {
-                moving.set(false);
+            if let Err(e) = api::post::<_, Accepted>(&format!("/library/roots/{id}/move"), &MoveRequest { target_path: t, dry_run: false }).await {
+                starting.set(false);
                 error.set(Some(e.message()));
+            }
+        });
+    };
+    let stop = move |_| {
+        let Some(id) = root.get_untracked().map(|r| r.id) else { return };
+        stopping.set(true);
+        spawn_local(async move {
+            if let Err(e) = api::post::<_, Accepted>(&format!("/library/roots/{id}/move/cancel"), &serde_json::json!({})).await {
+                stopping.set(false);
+                toast_err(&e.message());
             }
         });
     };
     let can_move = Signal::derive(move || plan.get().map(|p| p.ok).unwrap_or(false) && !moving.get());
     let title = Signal::derive(move || "Move to another folder or drive".to_string());
     let footer = crate::ds::children(move || view! {
-        <Button variant=Variant::Ghost disabled=moving on_click=move |_| open.set(false)>"Close"</Button>
+        <Button variant=Variant::Ghost title="A running move keeps going in the background" on_click=move |_| open.set(false)>
+            {move || if moving.get() { "Hide" } else { "Close" }}
+        </Button>
+        <Show when=move || active.get().is_some()>
+            <Button icon="x" busy=stopping title="Stop after the file in hand; everything moved so far stays consistent" on_click=stop>"Stop"</Button>
+        </Show>
         <Button variant=Variant::Primary icon="hdd" busy=moving disabled=Signal::derive(move || !can_move.get()) on_click=run.clone()>
-            {move || plan.get().map(|p| format!("Move {} files", format_count(p.file_count))).unwrap_or_else(|| "Move".into())}
+            {move || match plan.get() {
+                Some(p) if p.merge_into.is_some() => format!("Merge {} files", format_count(p.file_count)),
+                Some(p) => format!("Move {} files", format_count(p.file_count)),
+                None => "Move".into(),
+            }}
         </Button>
     });
     view! {
@@ -320,13 +424,13 @@ fn MoveRootDialog(root: RwSignal<Option<RootOut>>, open: RwSignal<bool>, on_done
                 <div class="mono faint truncate">{move || root.get().map(|r| r.path).unwrap_or_default()}</div>
                 <div class="row gap">
                     <input class="input mono grow" placeholder="/mnt/new-drive/music" spellcheck="false" aria-label="Target folder"
-                        prop:value=move || target.get()
+                        prop:value=move || target.get() prop:disabled=moving
                         on:input=move |ev| { target.set(event_target_value(&ev)); plan.set(None); }
                         on:keydown={ let c = check2.clone(); move |ev| if ev.key() == "Enter" { c() } } />
                     <Button busy=checking disabled=Signal::derive(move || target.get().trim().is_empty() || moving.get()) on_click=move |_| check()>"Check"</Button>
                 </div>
                 <Notice text=error />
-                {move || plan.get().map(|p| {
+                {move || plan.get().filter(|_| !moving.get()).map(|p| {
                     let (blockers, notes) = split_warnings(&p.warnings);
                     view! {
                         <div class="plan">
@@ -335,25 +439,19 @@ fn MoveRootDialog(root: RwSignal<Option<RootOut>>, open: RwSignal<bool>, on_done
                                 <span>{format_bytes(p.total_bytes as f64)}</span>
                                 <span>{format!("{} free on target", format_bytes(p.free_bytes as f64))}</span>
                             </div>
-                            <Badge tone={if p.same_filesystem { Tone::Ok } else { Tone::Info }} icon={if p.same_filesystem { "check-circle" } else { "info" }}>
-                                {if p.same_filesystem { "Same drive: instant rename" } else { "Different drive: copy, verify, then delete" }}
-                            </Badge>
+                            <div class="row gap">
+                                <Badge tone={if p.same_filesystem { Tone::Ok } else { Tone::Info }} icon={if p.same_filesystem { "check-circle" } else { "info" }}>
+                                    {if p.same_filesystem { "Same drive: instant rename" } else { "Different drive: copy, verify, then delete" }}
+                                </Badge>
+                                {p.merge_into.is_some().then(|| view! { <Badge tone=Tone::Info icon="layers">"Merge into library folder"</Badge> })}
+                            </div>
                             {blockers.into_iter().map(|w| view! { <p class="sys-notice danger"><Icon name="x-circle" />{w}</p> }).collect_view()}
                             {notes.into_iter().map(|w| view! { <p class="sys-notice warn"><Icon name="alert" />{w}</p> }).collect_view()}
-                            {(!p.same_filesystem && p.ok).then(|| view! { <p class="sys-hint faint">"Each file is copied, verified, then removed, so an interruption never leaves a half-written track. Safe to stop and re-run."</p> })}
+                            {p.ok.then(|| view! { <p class="sys-hint faint">"Each file is moved and recorded before the next, and nothing is ever written over. Safe to stop, close the window or quit: an interrupted move picks up where it left off."</p> })}
                         </div>
                     }
                 })}
-                {move || prog.get().filter(|_| moving.get()).map(|p| {
-                    let v = (p.total > 0).then(|| p.moved as f64 / p.total as f64);
-                    view! {
-                        <div class="root-progress" role="status">
-                            <Meter value=v label="Move progress" />
-                            <span class="mono faint">{format!("{} / {} files, {}", format_count(p.moved), format_count(p.total), format_bytes(p.bytes_moved as f64))}</span>
-                            {p.current.map(|c| view! { <span class="mono faint truncate">{c}</span> })}
-                        </div>
-                    }
-                })}
+                {move || active.get().map(|p| view! { <MoveMeter p=p /> })}
             </div>
         </Dialog>
     }

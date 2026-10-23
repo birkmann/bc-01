@@ -139,6 +139,12 @@ fn watch_loop(ctx: Ctx, cfg: WatchConfig, stop: Arc<AtomicBool>) {
             && (l.elapsed() >= cfg.debounce || f.elapsed() >= cfg.max_wait)
         {
             for (root_id, paths) in pending.drain() {
+                // A move rewrites the rows of the roots it holds as each file lands; ingesting its
+                // half-done state would race it for those rows (and mark the source side missing).
+                let Ok(_guard) = bc_libcore::root_lock::try_lock(&ctx.db, &[root_id], "watch") else {
+                    tracing::debug!(root_id, "root busy, watch events dropped");
+                    continue;
+                };
                 let paths: Vec<PathBuf> = paths.into_iter().collect();
                 match crate::scanner::scan_paths(&ctx, root_id, &paths) {
                     Ok(r) => tracing::info!(root_id, added = r.files_added, updated = r.files_updated, missing = r.files_missing, "watch ingest"),

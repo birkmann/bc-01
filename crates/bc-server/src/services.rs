@@ -114,6 +114,22 @@ impl Services {
     }
 }
 
+impl Services {
+    /// Labels of the running library work that must not be cut off by quitting (moves, scans,
+    /// imports). The desktop shell stays up while there is any, window or not.
+    pub fn busy(&self) -> Vec<String> {
+        #[allow(unused_mut)]
+        let mut out = Vec::new();
+        #[cfg(feature = "library")]
+        if let Some(l) = &self.library {
+            out.extend(
+                l.ctx().jobs.list().into_iter().filter(|t| t.state == "running" && matches!(t.kind.as_str(), "move" | "scan" | "import")).map(|t| t.label),
+            );
+        }
+        out
+    }
+}
+
 /// Every service router, state already applied, paths WITHOUT the `/api` prefix.
 pub fn routers(state: &AppState) -> Router {
     let mut r = Router::new();

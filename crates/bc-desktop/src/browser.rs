@@ -341,9 +341,10 @@ pub async fn run(core: Arc<Core>) -> anyhow::Result<()> {
                 if !open {
                     *app.window.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 }
-                // Window closed: keep playing in the background; once nothing has played for
-                // a while (or right away if nothing was playing when it closed), quit.
-                if open || app.core.playing() || find_browser().is_none() {
+                // Window closed: keep playing (and moving, scanning) in the background; once
+                // nothing has played for a while (or right away if nothing was playing when it
+                // closed), quit.
+                if open || app.core.playing() || app.core.busy() || find_browser().is_none() {
                     idle_s = 0;
                 } else {
                     idle_s += 2;

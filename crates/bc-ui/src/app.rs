@@ -58,6 +58,7 @@ pub fn App() -> impl IntoView {
     Effect::new(move |_| crate::util::ls_set("bc:nav-collapsed:v1", if ctx.nav_collapsed.get() { "1" } else { "0" }));
     provide_menu();
     crate::data::ws::start();
+    crate::data::busy::install();
     crate::theme::provide_theme();
     crate::prefs::provide_prefs();
     crate::player::provide_player();

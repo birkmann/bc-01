@@ -1,5 +1,6 @@
 //! Data layer: keyed resource cache with stale-while-revalidate and targeted
 //! invalidation from WS events, plus the realtime client.
+pub mod busy;
 pub mod cache;
 pub mod jobs;
 pub mod query;

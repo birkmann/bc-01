@@ -11,6 +11,7 @@
 //! | `POST /releases/delete`, `DELETE /tracks/{id}`, `DELETE /releases/{id}`, `DELETE /labels/{id}` | deletes (files confined to registered roots) |
 //! | `POST /tracks/remove` | out of the library, files kept (and excluded from scans) |
 //! | `POST /library/roots/{id}/move/plan`, `POST /library/roots/{id}/move` | relocate a root (the move is a tracked task, `202 Accepted`) |
+//! | `POST /library/roots/{id}/move/cancel`, `GET /library/moves` | stop a move; the moves running now |
 //! | `GET\|PUT /library/scope`, `GET\|PUT /library/snippets` | library scope and snippet settings |
 //!
 //! The `/loved-streams*` routes (list, love, unlove, auto, download) belong to WS2 (orchestrator
@@ -31,6 +32,8 @@ mod delete_routes;
 mod fill;
 mod loved;
 mod move_root;
+
+pub use move_root::resume_pending as resume_moves;
 mod settings;
 mod strays_routes;
 
@@ -80,6 +83,8 @@ pub fn router_with(ctx: Ctx, lookup: Option<Arc<dyn BandcampLookup>>, retag: Arc
         .route("/labels/{id}", delete(delete_routes::delete_label))
         .route("/library/roots/{id}/move/plan", post(move_root::plan))
         .route("/library/roots/{id}/move", post(move_root::start))
+        .route("/library/roots/{id}/move/cancel", post(move_root::cancel))
+        .route("/library/moves", get(move_root::list))
         .route("/library/scope", get(settings::get_scope).put(settings::set_scope))
         .route("/library/snippets", get(settings::get_snippets).put(settings::set_snippets))
         .with_state(state)

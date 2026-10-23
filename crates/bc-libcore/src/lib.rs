@@ -9,6 +9,7 @@ pub mod files;
 pub mod hydrate;
 pub mod jobs;
 pub mod queue;
+pub mod root_lock;
 pub mod secrets;
 pub mod scope;
 
