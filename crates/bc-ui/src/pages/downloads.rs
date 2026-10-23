@@ -42,6 +42,9 @@ pub fn DownloadsPage() -> impl IntoView {
             open
         })
     });
+    // The list shell only needs to know whether there is anything to show: subscribing it to `ids`
+    // itself would rebuild every card (and reset their expanded state) whenever a job comes or goes.
+    let empty = Memo::new(move |_| ids.with(|i| i.is_empty()));
     let active = Signal::derive(move || store.jobs.with(|v| v.iter().filter(|j| is_active(&j.status)).count()));
     let finished = Signal::derive(move || store.jobs.with(|v| v.iter().filter(|j| j.status == JOB_COMPLETED && j.failed == 0).count()));
     let subtitle = Signal::derive(move || {
@@ -91,7 +94,7 @@ pub fn DownloadsPage() -> impl IntoView {
                 </div>
                 {move || if !store.loaded.get() {
                     view! { <div class="dl-list"><Skeleton height="68px" /><Skeleton height="68px" /></div> }.into_any()
-                } else if ids.with(|i| i.is_empty()) {
+                } else if empty.get() {
                     view! { <EmptyState title="No downloads yet" hint="Paste some Bandcamp URLs above, or queue releases from Feed, Fans and Explore." icon="download" /> }.into_any()
                 } else {
                     view! {
