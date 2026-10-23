@@ -12,7 +12,8 @@ use super::bandcamp::{Actions, BandCatalogue, BandcampPicker, CatalogDownloadBut
 use super::edit::{EditDialog, EditTarget, remove_label};
 use super::folder::play_label;
 use super::logic as lg;
-use super::shared::{Collage, FavButton, Kind, NoticeBar, Q, ReleaseCard, open_tab, use_favs, use_q};
+use super::shared::{Collage, FavButton, Kind, NoticeBar, Q, open_tab, use_favs, use_q};
+use crate::pages::albums::card::{AlbumCard, META_H};
 use super::strays::StraysTrigger;
 use crate::api;
 use crate::data::QuerySpec;
@@ -126,6 +127,8 @@ pub fn LabelDetailPage() -> impl IntoView {
     });
     let source_key = Signal::derive(move || format!("{}|{}", id.get(), sort.get()));
     let listing = Signal::derive(move || release_listing(id.get(), &sort.get()));
+    // Same card size as the Albums grid.
+    let (card_w, card_gap) = if crate::util::is_mobile() { (140.0, 12.0) } else { (168.0, 16.0) };
     let sort_options = Signal::derive(|| lg::RELEASE_SORTS.iter().map(|s| SelectOption::new(s.0, s.1)).collect::<Vec<_>>());
     let roster_n = Signal::derive(move || band_data.get().map(|b| b.roster.len()).unwrap_or(0));
 
@@ -233,8 +236,8 @@ pub fn LabelDetailPage() -> impl IntoView {
                                     <Select options=sort_options value=sort aria_label="Sort releases" class="pp-sort" />
                                 </div>
                                 <div class="pp-fill">
-                                    <CardGrid fetch=fetcher.clone() source_key=source_key min_card_w=144.0 meta_h=48.0 gap=12.0 entities=vec!["release"]
-                                        render=Callback::new(move |(r, _w): (ReleaseOut, f64)| view! { <ReleaseCard r=r listing=listing show_artist=true /> }.into_any())
+                                    <CardGrid fetch=fetcher.clone() source_key=source_key min_card_w=card_w meta_h=META_H gap=card_gap entities=vec!["release"]
+                                        render=Callback::new(move |(r, _w): (ReleaseOut, f64)| view! { <AlbumCard release=r listing=listing.get_untracked() /> }.into_any())
                                         empty=move || view! { <EmptyState icon="disc" title="Nothing on this label yet" /> } />
                                 </div>
                             </div>

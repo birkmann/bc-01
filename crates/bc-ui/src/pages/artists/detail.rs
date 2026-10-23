@@ -13,7 +13,8 @@ use crate::logic::format::{format_bpm, format_count, format_duration_ms};
 use crate::pages::labels::bandcamp::{Actions, BandCatalogue, BandcampPicker, BandcampRelated, CatalogDownloadButton, Entity, use_band};
 use crate::pages::labels::edit::{EditDialog, EditTarget};
 use crate::pages::labels::logic as lg;
-use crate::pages::labels::shared::{Cover, FavButton, Kind, NoticeBar, Q, ReleaseCard, open_tab, use_favs, use_q};
+use crate::pages::albums::card::{AlbumCard, CardRow, META_H};
+use crate::pages::labels::shared::{Cover, FavButton, Kind, NoticeBar, Q, open_tab, use_favs, use_q};
 use crate::util::{qs, qs_pairs};
 use crate::widgets::card_grid::CardGrid;
 use crate::widgets::common::{Art, LoveButton, album_link, enqueue_tracks, play_next_tracks, play_tracks, title_link};
@@ -105,6 +106,8 @@ pub fn ArtistDetailPage() -> impl IntoView {
     });
     let rel_key = Signal::derive(move || id.get().to_string());
     let rel_listing = Signal::derive(move || listing(id.get()));
+    // Same card size as the Albums grid.
+    let (card_w, card_gap) = if crate::util::is_mobile() { (140.0, 12.0) } else { (168.0, 16.0) };
 
     // tracks
     let sort = RwSignal::new(("album".to_string(), false));
@@ -214,8 +217,8 @@ pub fn ArtistDetailPage() -> impl IntoView {
                         "bandcamp" => view! { <ArtistBandcamp artist=artist band=band anchor=anchor_url actions=actions edit=edit /> }.into_any(),
                         _ => view! {
                             <div class="pp-fill">
-                                <CardGrid fetch=rel_fetch.clone() source_key=rel_key min_card_w=144.0 meta_h=48.0 gap=12.0 entities=vec!["release"]
-                                    render=Callback::new(move |(r, _w): (ReleaseOut, f64)| view! { <ReleaseCard r=r listing=rel_listing /> }.into_any())
+                                <CardGrid fetch=rel_fetch.clone() source_key=rel_key min_card_w=card_w meta_h=META_H gap=card_gap entities=vec!["release"]
+                                    render=Callback::new(move |(r, _w): (ReleaseOut, f64)| view! { <AlbumCard release=r listing=rel_listing.get_untracked() /> }.into_any())
                                     empty=move || view! { <EmptyState icon="disc" title="No releases in the library" hint="Tracks of this artist sit on compilations or other artists' releases." /> } />
                             </div>
                         }.into_any(),
@@ -317,13 +320,12 @@ fn Similar(related: Q<ArtistRelatedOut>) -> impl IntoView {
                             _ => None,
                         };
                         let items = g.items.clone();
-                        let lj = Signal::derive(|| serde_json::Value::Null);
                         view! {
                             <section class="pp-section">
                                 <h2 class="section-title">{match href { Some(h) => view! { <a class="pp-link" href=h>{g.title.clone()}</a> }.into_any(), None => view! { <span>{g.title.clone()}</span> }.into_any() }}</h2>
-                                <div class="pp-strip">
-                                    {items.into_iter().map(|r| view! { <div class="pp-strip-item"><ReleaseCard r=r listing=lj show_artist=true /></div> }).collect_view()}
-                                </div>
+                                <CardRow>
+                                    {items.into_iter().map(|r| view! { <div class="lib-row-item"><AlbumCard release=r /></div> }).collect_view()}
+                                </CardRow>
                             </section>
                         }
                     }).collect_view()}

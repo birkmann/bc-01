@@ -77,7 +77,7 @@
 .pp-chipbtn-primary { background: var(--color-accent); color: var(--color-accent-ink); }
 .pp-chipbtn-primary:hover:not(:disabled) { background: var(--color-accent-hover); }
 .pp-card-tools { position: absolute; top: 16px; right: 16px; z-index: 3; display: flex; gap: 6px; }
-.pp-artist .pp-card-tools, .pp-release .pp-card-tools { top: 16px; right: 16px; }
+.pp-artist .pp-card-tools { top: 16px; right: 16px; }
 .pp-play-pair { position: absolute; right: 6px; bottom: 6px; z-index: 3; display: flex; gap: 6px; align-items: center; }
 .pp-play-pair .pp-chipbtn-primary { width: 34px; height: 34px; }
 .pp-check { position: absolute; top: 16px; left: 16px; z-index: 3; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--color-surface-1) 84%, transparent); color: var(--color-ink-faint); backdrop-filter: blur(6px); border: 1.5px solid var(--color-ink-muted); }

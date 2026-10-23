@@ -244,50 +244,6 @@ pub fn open_tab(url: &str) {
     let _ = crate::util::window().open_with_url_and_target_and_features(url, "_blank", "noopener");
 }
 
-// ---- release card ---------------------------------------------------------------------------------
-
-use bc_types::library::ReleaseOut;
-use bc_types::player::{PlayerCommand, QueueSource};
-
-use crate::player::use_player;
-use crate::widgets::common::artist_link;
-
-/// A library release in a grid: cover, play on hover, title, byline; links to the album page.
-#[component]
-pub fn ReleaseCard(r: ReleaseOut, #[prop(into)] listing: Signal<serde_json::Value>, #[prop(optional)] show_artist: bool) -> impl IntoView {
-    let player = use_player();
-    let id = r.id;
-    let now = move || player.state.with(|s| s.current.as_ref().and_then(|c| c.release_id) == Some(id));
-    let art = r.art_url.as_ref().map(|u| super::logic::thumb(u));
-    let artist = r.artist.as_ref().filter(|_| show_artist).map(|a| view! { {artist_link(Some(a))}" \u{b7} " });
-    let mut sub: Vec<String> = vec![];
-    if let Some(y) = r.year {
-        sub.push(y.to_string());
-    }
-    sub.push(super::logic::count_of(r.track_count, "track"));
-    let partial = r.expected_track_count.filter(|e| *e > r.track_count);
-    view! {
-        <div class="pp-card pp-release" class:cur=now>
-            <div class="pp-card-art">
-                <Cover src=art />
-                {partial.map(|e| view! { <div class="pp-card-badges"><span class="badge badge-warn" title="Part of this album is missing">{format!("{}/{}", r.track_count, e)}</span></div> })}
-                <button type="button" class="pp-chipbtn pp-chipbtn-primary pp-card-act pp-card-play" aria-label=format!("Play {}", r.title)
-                    on:click=move |ev| {
-                        ev.stop_propagation(); ev.prevent_default();
-                        player.cmd(PlayerCommand::StartSource { source: QueueSource::Release { release_id: id, listing: listing.get_untracked() }, shuffle: false });
-                    }>
-                    <Icon name="play" />
-                </button>
-            </div>
-            <div class="pp-card-meta">
-                <div class="pp-card-title truncate" title=r.title.clone()>{r.title.clone()}</div>
-                <div class="pp-card-sub truncate">{artist}{sub.join(" \u{b7} ")}</div>
-            </div>
-            <a class="pp-card-link" href=format!("/albums/{id}") aria-label=r.title.clone()></a>
-        </div>
-    }
-}
-
 // ---- Copy query handle -----------------------------------------------------------------------------
 
 use std::sync::Arc;
