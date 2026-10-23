@@ -16,8 +16,10 @@
 //! * **The target can be another root.** Moving a downloads folder into the library folder (or a
 //!   folder inside it) *merges*: the files join that root and this root keeps its path, so new
 //!   downloads still have somewhere to land. A file is never written over another one: an
-//!   identical copy already at the destination counts as moved, anything else is a conflict and
-//!   stays where it is.
+//!   identical copy already at the destination counts as moved, and a file another row already
+//!   has there is a duplicate (the same record downloaded twice): its track is folded into that
+//!   row's, user data and all, and the source copy goes, so the source ends up clean. Anything
+//!   else (an untracked, different file in the way) is a conflict and stays where it is.
 //!
 //! The caller holds both roots in [`bc_libcore::root_lock`] for the whole move, so no scan, watcher
 //! ingest or second move works on them meanwhile.
@@ -68,7 +70,7 @@ pub struct RelocatePlan {
     pub target_exists: bool,
     pub target_empty: bool,
     pub merge_into: Option<MergeInto>,
-    /// Rows whose destination path another row already has.
+    /// Rows whose destination path another row already has: duplicates, folded into that row.
     pub conflicts: i64,
     pub warnings: Vec<String>,
 }
@@ -129,6 +131,8 @@ pub struct RelocateProgress {
     pub errors: Vec<String>,
     /// Left where they are: the destination already holds a different file.
     pub conflicts: Vec<String>,
+    /// Rows that were duplicates of a row already at the destination, folded into it.
+    pub duplicates: i64,
     pub done: bool,
     /// Set once `done`.
     pub outcome: Option<MoveOutcome>,
@@ -272,7 +276,7 @@ pub fn plan(ctx: &Ctx, root_id: i64, target_path: &str) -> Result<RelocatePlan, 
         p.conflicts = count_conflicts(ctx, &p, &source, &target)?;
         if p.conflicts > 0 {
             p.warnings.push(format!(
-                "{} file(s) are already in the library under the same name. They are left where they are, listed when the move is done.",
+                "{} file(s) are already in the library under the same name. The library's copy stays, taking over plays, loves and playlist entries, and the duplicate is removed from this folder.",
                 p.conflicts
             ));
         }
@@ -405,6 +409,8 @@ pub fn move_file(source: &Path, target: &Path, same_fs: bool) -> std::io::Result
 enum Step {
     /// At its destination (moved now, earlier, or missing at both ends); `bytes` moved now.
     Placed { bytes: u64 },
+    /// A duplicate of the row already at the destination: folded into it, its source copy gone.
+    Folded { bytes: u64 },
     /// Destination taken by a different file or by another row: left as it was.
     Conflict(String),
 }
@@ -473,6 +479,10 @@ fn execute_with(
                     progress.current = relative.clone();
                     match move_one(ctx, id, &old, &new, new_root, &new_rel, same_fs) {
                         Ok(Step::Placed { bytes }) => progress.bytes_moved += bytes as i64,
+                        Ok(Step::Folded { bytes }) => {
+                            progress.bytes_moved += bytes as i64;
+                            progress.duplicates += 1;
+                        }
                         Ok(Step::Conflict(why)) => progress.conflicts.push(format!("{relative}: {why}")),
                         Err(e) => {
                             tracing::warn!(file = %relative, error = %e, "relocate failed");
@@ -539,14 +549,14 @@ fn pending_rows(ctx: &Ctx, root_id: i64, tried: &HashSet<i64>) -> Result<Vec<i64
 /// Bring one row to `new`: move its file if it is still at `old`, then rewrite the row.
 fn move_one(ctx: &Ctx, id: i64, old: &Path, new: &Path, new_root: i64, new_rel: &str, same_fs: bool) -> Result<Step, String> {
     let new_s = new.to_string_lossy().into_owned();
-    // Another row has this path: the file there is that row's (a duplicate already in the library).
+    // Another row has this path: the same record, already in the library.
     let owner: Option<i64> = {
         let p = new_s.clone();
         ctx.read(move |c| Ok(c.query_row("SELECT id FROM files WHERE path = ?1 AND id != ?2", (p, id), |r| r.get(0)).optional()?))
             .map_err(|e| e.to_string())?
     };
-    if owner.is_some() {
-        return Ok(Step::Conflict(format!("already in the library as {new_s}")));
+    if let Some(owner) = owner {
+        return fold_duplicate(ctx, id, owner, old, new, same_fs);
     }
     let mut bytes = 0;
     if old.exists() && !same_file(old, new) {
@@ -575,6 +585,62 @@ fn move_one(ctx: &Ctx, id: i64, old: &Path, new: &Path, new_root: i64, new_rel: 
     })
     .map_err(|e| e.to_string())?;
     Ok(Step::Placed { bytes })
+}
+
+/// Fold row `id` (at `old`) into row `owner`, which already has its destination `new`: the same
+/// record downloaded twice. The owner's track keeps the user data of both ([`fold_user_data`]); the
+/// duplicate's file row and track go (its release too, once empty); and the source copy goes --
+/// moved into place first when the owner's own file is missing, so the last copy is never lost.
+fn fold_duplicate(ctx: &Ctx, id: i64, owner: i64, old: &Path, new: &Path, same_fs: bool) -> Result<Step, String> {
+    let mut bytes = 0;
+    if old.exists() && !new.exists() {
+        bytes = move_file(old, new, same_fs).map_err(|e| e.to_string())?;
+        let m = std::fs::metadata(new).map_err(|e| e.to_string())?;
+        let now = now_db();
+        ctx.write(move |t| {
+            use std::os::unix::fs::MetadataExt;
+            t.execute(
+                "UPDATE files SET size_bytes = ?1, mtime_ns = ?2, inode = ?3, last_seen_at = ?4, missing_since = NULL WHERE id = ?5",
+                (m.len() as i64, m.mtime() * 1_000_000_000 + m.mtime_nsec(), m.ino() as i64, now, owner),
+            )?;
+            Ok(())
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    let emptied = ctx
+        .write(move |t| {
+            let track_of = |file: i64| t.query_row("SELECT track_id FROM files WHERE id = ?1", [file], |r| r.get::<_, i64>(0));
+            let (dup, keeper) = (track_of(id)?, track_of(owner)?);
+            t.execute("DELETE FROM files WHERE id = ?1", [id])?;
+            if dup == keeper || t.query_row("SELECT EXISTS(SELECT 1 FROM files WHERE track_id = ?1)", [dup], |r| r.get::<_, bool>(0))? {
+                return Ok(None);
+            }
+            crate::strays::fold_user_data(t, dup, keeper)?;
+            let (release, keeper_release): (Option<i64>, Option<i64>) = (
+                t.query_row("SELECT release_id FROM tracks WHERE id = ?1", [dup], |r| r.get(0))?,
+                t.query_row("SELECT release_id FROM tracks WHERE id = ?1", [keeper], |r| r.get(0))?,
+            );
+            crate::delete::release_tag_counts(t, &[dup])?;
+            bc_db::fts::remove_tracks(t, &[dup]).map_err(ApiError::from)?;
+            t.execute("DELETE FROM tracks WHERE id = ?1", [dup])?;
+            let Some(rid) = release.filter(|r| Some(*r) != keeper_release) else { return Ok(None) };
+            if t.query_row("SELECT EXISTS(SELECT 1 FROM tracks WHERE release_id = ?1)", [rid], |r| r.get::<_, bool>(0))? {
+                return Ok(None);
+            }
+            crate::strays::repoint_inbox(t, rid, keeper_release)?;
+            crate::tidy::delete_artwork_rows(t, &[rid])?;
+            t.execute("DELETE FROM releases WHERE id = ?1", [rid])?;
+            Ok(Some(rid))
+        })
+        .map_err(|e| e.to_string())?;
+    if let Some(rid) = emptied {
+        crate::tidy::delete_artwork(&ctx.config.art_dir(), &[rid]);
+    }
+    // The library has its own copy at `new`: this one is surplus.
+    if old.exists() && !same_file(old, new) {
+        std::fs::remove_file(old).map_err(|e| format!("folded, but could not remove the source copy: {e}"))?;
+    }
+    Ok(Step::Folded { bytes })
 }
 
 /// Remove directories left behind, deepest first. Never removes the root itself, and never
@@ -925,27 +991,64 @@ mod tests {
         assert!(p.ok(), "{:?}", p.warnings);
         assert_eq!(p.merge_into.as_ref().map(|m| m.root_id), Some(lib_root));
         assert_eq!(p.conflicts, 1);
+        let dup_track = q_i64(&l.env.db, &format!("SELECT track_id FROM files WHERE root_id={} AND rel_path LIKE '%03 - track.mp3'", l.root_id));
+        let keeper = q_i64(&l.env.db, &format!("SELECT track_id FROM files WHERE id={lib_file}"));
+        exec(&l.env.db, &format!("UPDATE tracks SET play_count = 5, loved = 1 WHERE id = {dup_track}"));
+        exec(&l.env.db, "INSERT INTO playlists(id, name, kind, created_at, updated_at) VALUES (1, 'set', 'manual', '2024-01-01 00:00:00', '2024-01-01 00:00:00')");
+        exec(&l.env.db, &format!("INSERT INTO playlist_items(playlist_id, track_id, position, added_at) VALUES (1, {dup_track}, 1, '2024-01-01 00:00:00')"));
 
         let r = run_copying(&l, &lib_dir).unwrap();
         assert_eq!(r.outcome, Some(MoveOutcome::Complete), "{r:?}");
-        assert_eq!(r.conflicts.len(), 1, "track 3 is already in the library");
-        // The two that moved now belong to the library root, relative to it.
+        assert!(r.conflicts.is_empty(), "{r:?}");
+        assert_eq!(r.duplicates, 1, "track 3 was already in the library");
+        // Everything now belongs to the library root, relative to it; the source root is empty.
         assert_eq!(q_i64(&l.env.db, &format!("SELECT COUNT(*) FROM files WHERE root_id={lib_root}")), 3);
+        assert_eq!(q_i64(&l.env.db, &format!("SELECT COUNT(*) FROM files WHERE root_id={}", l.root_id)), 0);
         assert_eq!(
             q_str(&l.env.db, &format!("SELECT rel_path FROM files WHERE root_id={lib_root} AND path LIKE '%01 - track.mp3'")).unwrap(),
             "Somatic/Grid Failure/01 - track.mp3"
         );
-        // The conflicting one stays where it was, in its own root; the library's file is untouched.
-        assert!(l.old.join("Somatic/Grid Failure/03 - track.mp3").is_file());
-        assert_eq!(q_i64(&l.env.db, &format!("SELECT COUNT(*) FROM files WHERE root_id={}", l.root_id)), 1);
+        // The duplicate is gone from disk and database; the library's copy is untouched and has its data.
+        assert_eq!(mp3s(&l.old), 0, "the source is clean");
         assert_eq!(std::fs::read(lib_dir.join("Somatic/Grid Failure/03 - track.mp3")).unwrap(), b"the library's own copy");
-        assert_eq!(q_str(&l.env.db, &format!("SELECT path FROM files WHERE id={lib_file}")).unwrap(), lib_dir.join("Somatic/Grid Failure/03 - track.mp3").to_str().unwrap());
+        assert_eq!(q_i64(&l.env.db, &format!("SELECT COUNT(*) FROM tracks WHERE id={dup_track}")), 0);
+        assert_eq!(q_i64(&l.env.db, &format!("SELECT play_count FROM tracks WHERE id={keeper}")), 5);
+        assert_eq!(q_i64(&l.env.db, &format!("SELECT loved FROM tracks WHERE id={keeper}")), 1);
+        assert_eq!(q_i64(&l.env.db, "SELECT track_id FROM playlist_items"), keeper, "the playlist entry follows");
+        assert_eq!(q_i64(&l.env.db, "SELECT COUNT(*) FROM releases WHERE title = 'Grid Failure'"), 1, "a release with other tracks stays");
         // The merged root keeps its path (new downloads still land there).
         assert_eq!(root_path(&l), l.old.to_str().unwrap());
         assert!(l.old.is_dir());
         for p in q_paths(&l.env.db) {
             assert!(Path::new(&p).is_file(), "{p}");
         }
+    }
+
+    #[test]
+    fn a_duplicate_whose_library_copy_is_missing_takes_its_place() {
+        let l = lib();
+        let (lib_dir, _, lib_file) = with_library_root(&l);
+        let rel = "Somatic/Grid Failure/03 - track.mp3";
+        std::fs::remove_file(lib_dir.join(rel)).unwrap();
+        exec(&l.env.db, &format!("UPDATE files SET missing_since = '2026-01-01 00:00:00' WHERE id = {lib_file}"));
+        let r = run_copying(&l, &lib_dir).unwrap();
+        assert_eq!((r.duplicates, r.outcome), (1, Some(MoveOutcome::Complete)), "{r:?}");
+        assert_eq!(std::fs::read(lib_dir.join(rel)).unwrap(), vec![3u8; 3000], "the only copy moved into place");
+        assert!(!l.old.join(rel).exists());
+        assert_eq!(q_i64(&l.env.db, &format!("SELECT missing_since IS NULL FROM files WHERE id={lib_file}")), 1);
+        assert_eq!(q_i64(&l.env.db, &format!("SELECT size_bytes FROM files WHERE id={lib_file}")), 3000);
+    }
+
+    #[test]
+    fn a_duplicate_alone_in_its_release_takes_the_release_with_it() {
+        let l = lib();
+        let (lib_dir, _, _) = with_library_root(&l);
+        // Track 3 on a release of its own.
+        let solo = seed_release(&l.env.db, "Somatic", "Grid Failure (single)", None, None);
+        exec(&l.env.db, &format!("UPDATE tracks SET release_id = {solo} WHERE id = (SELECT track_id FROM files WHERE root_id={} AND rel_path LIKE '%03 - track.mp3')", l.root_id));
+        let r = run_copying(&l, &lib_dir).unwrap();
+        assert_eq!(r.duplicates, 1, "{r:?}");
+        assert_eq!(q_i64(&l.env.db, &format!("SELECT COUNT(*) FROM releases WHERE id={solo}")), 0);
     }
 
     #[test]

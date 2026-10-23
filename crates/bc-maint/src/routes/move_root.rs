@@ -103,6 +103,8 @@ pub async fn spawn(ctx: &Ctx, id: i64, target: &str) -> ApiResult<String> {
             bytes_moved: p.bytes_moved,
             current: Some(p.current.clone()),
             done: p.done,
+            duplicates: p.duplicates,
+            left: (p.conflicts.len() + p.errors.len()) as i64,
             outcome: p.outcome,
             ..first.clone()
         };
@@ -146,6 +148,9 @@ pub async fn spawn(ctx: &Ctx, id: i64, target: &str) -> ApiResult<String> {
                     errors: p.errors.iter().take(50).cloned().collect(),
                     new_path,
                     conflicts: p.conflicts.iter().take(50).cloned().collect(),
+                    conflict_count: p.conflicts.len() as i64,
+                    error_count: p.errors.len() as i64,
+                    duplicates: p.duplicates,
                     outcome,
                 };
                 handle.finish_ok(serde_json::to_value(res).unwrap_or_default());

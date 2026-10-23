@@ -850,7 +850,8 @@ pub struct MovePlanOut {
     /// this one keeps its path (a downloads root keeps receiving new downloads).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_into: Option<String>,
-    /// Files whose destination path another root's file already has. They are left where they are.
+    /// Files whose destination path another root's file already has: duplicates, folded into that
+    /// file's track (its user data kept) and removed from the source.
     #[serde(default)]
     pub conflicts: i64,
 }
@@ -864,9 +865,18 @@ pub struct MoveResult {
     pub errors: Vec<String>,
     pub new_path: String,
     /// Files left where they were because the destination already holds a different file
-    /// (first 50).
+    /// (first 50; `conflict_count` has them all).
     #[serde(default)]
     pub conflicts: Vec<String>,
+    #[serde(default)]
+    pub conflict_count: i64,
+    /// `errors` is the first 50 of these.
+    #[serde(default)]
+    pub error_count: i64,
+    /// Duplicates of a file already at the destination (the same record downloaded twice), folded
+    /// into it: user data kept on the library's copy, the duplicate track and source file gone.
+    #[serde(default)]
+    pub duplicates: i64,
     #[serde(default)]
     pub outcome: MoveOutcome,
 }
@@ -1084,12 +1094,18 @@ pub struct MoveProgress {
     pub root_id: i64,
     #[serde(default)]
     pub target: String,
-    /// Files processed so far (moved, already there, missing or skipped). Never goes down.
+    /// Files processed so far (moved, already there, missing, folded or skipped). Never goes down.
     pub moved: i64,
     pub total: i64,
     pub bytes_moved: i64,
     pub current: Option<String>,
     pub done: bool,
+    /// Of `moved`: duplicates folded into the library's copy, and files left where they were
+    /// (conflicts and errors).
+    #[serde(default)]
+    pub duplicates: i64,
+    #[serde(default)]
+    pub left: i64,
     /// Set on the last event (`done`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<MoveOutcome>,

@@ -51,17 +51,17 @@ pub fn LibrarySection() -> impl IntoView {
         });
         stats.refetch();
         match p.outcome.unwrap_or_default() {
-            MoveOutcome::Complete => toast_ok(&format!("Moved {} files", format_count(p.moved))),
+            MoveOutcome::Complete => toast_ok(&move_summary(&p)),
             MoveOutcome::Cancelled => toast_ok(&format!("Move stopped after {} of {} files. Move again to finish it.", format_count(p.moved), format_count(p.total))),
             MoveOutcome::Failed => toast_err(&format!("Move stopped: {}. It resumes at the next start.", p.error.clone().unwrap_or_default())),
-            MoveOutcome::Incomplete => toast_warn("Move finished, but some files were left where they were"),
+            MoveOutcome::Incomplete => toast_warn(&format!("{}; {} left where they were", move_summary(&p), format_count(p.left))),
         }
         let job = p.job_id.clone();
         spawn_local(async move {
             if let Ok(t) = api::get::<serde_json::Value>(&format!("/library/tasks/{job}")).await
                 && let Some(r) = t.get("result").and_then(|r| serde_json::from_value::<MoveResult>(r.clone()).ok())
             {
-                move_report.set((!r.conflicts.is_empty() || !r.errors.is_empty()).then_some(r));
+                move_report.set((r.conflict_count + r.error_count > 0).then_some(r));
             }
         });
     });
@@ -309,19 +309,31 @@ fn MoveMeter(p: MoveProgress) -> impl IntoView {
     }
 }
 
+/// "Moved 7,997 files, 600 duplicates removed" from a finished move's last event.
+fn move_summary(p: &MoveProgress) -> String {
+    let moved = p.moved - p.duplicates - p.left;
+    let mut out = format!("Moved {} files", format_count(moved));
+    if p.duplicates > 0 {
+        out.push_str(&format!(", {} duplicates of library files removed", format_count(p.duplicates)));
+    }
+    out
+}
+
 /// What the last move left behind, file by file.
 #[component]
 fn MoveReport(r: MoveResult, on_dismiss: Callback<()>) -> impl IntoView {
-    let left = r.conflicts.len() + r.errors.len();
+    let left = r.conflict_count + r.error_count;
+    let shown = (r.conflicts.len() + r.errors.len()) as i64;
     view! {
         <div class="scan-results" aria-live="polite">
             <div class="scan-result">
                 <div class="row gap">
-                    <span class="grow">{format!("Last move: {} of {} files done; {} left where they were", format_count(r.moved - left as i64), format_count(r.total), left)}</span>
+                    <span class="grow">{format!("Last move: {} of {} files left where they were{}", format_count(left), format_count(r.total),
+                        if shown < left { format!(" (first {shown} below)") } else { String::new() })}</span>
                     <Button size=Size::Sm variant=Variant::Ghost icon="x" title="Dismiss" on_click=move |_| on_dismiss.run(()) />
                 </div>
                 {(!r.conflicts.is_empty()).then(|| view! {
-                    <p class="sys-hint faint">"Already in the library under the same name (nothing was overwritten):"</p>
+                    <p class="sys-hint faint">"A different file is already there under the same name (nothing was overwritten):"</p>
                 })}
                 {r.conflicts.iter().map(|e| view! { <div class="sys-notice warn"><Icon name="alert" /><span class="truncate">{e.clone()}</span></div> }).collect_view()}
                 {r.errors.iter().map(|e| view! { <div class="sys-notice danger"><Icon name="x-circle" /><span class="truncate">{e.clone()}</span></div> }).collect_view()}

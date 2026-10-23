@@ -658,23 +658,7 @@ fn absorb(ctx: &Ctx, track_id: i64, keeper: i64, release_id: i64, old_folder: Op
         Ok(st.query_map([track_id], |r| r.get(0))?.collect::<Result<_, _>>()?)
     })?;
     ctx.write(move |t| {
-        #[allow(clippy::type_complexity)]
-        let (pc, sc, loved, rating, comment, last, added): (i64, i64, bool, Option<i64>, Option<String>, Option<String>, String) = t.query_row(
-            "SELECT play_count, skip_count, loved, rating, comment, last_played_at, added_at FROM tracks WHERE id = ?1",
-            [track_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
-        )?;
-        t.execute(
-            "UPDATE tracks SET play_count = play_count + ?1, skip_count = skip_count + ?2, loved = (loved OR ?3),
-                 rating = COALESCE(rating, ?4), comment = COALESCE(comment, ?5),
-                 last_played_at = CASE WHEN ?6 IS NOT NULL AND (last_played_at IS NULL OR ?6 > last_played_at) THEN ?6 ELSE last_played_at END,
-                 added_at = CASE WHEN ?7 < added_at THEN ?7 ELSE added_at END
-              WHERE id = ?8",
-            (pc, sc, loved, rating, comment, last, added, keeper),
-        )?;
-        for table in ["playlist_items", "dj_set_items", "play_history"] {
-            t.execute(&format!("UPDATE {table} SET track_id = ?1 WHERE track_id = ?2"), (keeper, track_id))?;
-        }
+        fold_user_data(t, track_id, keeper)?;
         let keeper_release: Option<i64> = t.query_row("SELECT release_id FROM tracks WHERE id = ?1", [keeper], |r| r.get(0))?;
         repoint_inbox(t, release_id, keeper_release)?;
         delete::release_tag_counts(t, &[track_id])?;
@@ -703,9 +687,42 @@ fn absorb(ctx: &Ctx, track_id: i64, keeper: i64, release_id: i64, old_folder: Op
     Ok(())
 }
 
+/// Carry a duplicate track's user data onto the copy that stays: plays, skips, rating, loved,
+/// comment, the earliest added date, every playlist / set / history entry, and its hand-set cue
+/// points when the keeper has none (the auto-detected ones are recomputed). The caller deletes the
+/// duplicate.
+pub(crate) fn fold_user_data(t: &Transaction<'_>, track_id: i64, keeper: i64) -> ApiResult<()> {
+    #[allow(clippy::type_complexity)]
+    let (pc, sc, loved, rating, comment, last, added): (i64, i64, bool, Option<i64>, Option<String>, Option<String>, String) = t.query_row(
+        "SELECT play_count, skip_count, loved, rating, comment, last_played_at, added_at FROM tracks WHERE id = ?1",
+        [track_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+    )?;
+    t.execute(
+        "UPDATE tracks SET play_count = play_count + ?1, skip_count = skip_count + ?2, loved = (loved OR ?3),
+             rating = COALESCE(rating, ?4), comment = COALESCE(comment, ?5),
+             last_played_at = CASE WHEN ?6 IS NOT NULL AND (last_played_at IS NULL OR ?6 > last_played_at) THEN ?6 ELSE last_played_at END,
+             added_at = CASE WHEN ?7 < added_at THEN ?7 ELSE added_at END
+          WHERE id = ?8",
+        (pc, sc, loved, rating, comment, last, added, keeper),
+    )?;
+    for table in ["playlist_items", "dj_set_items", "play_history"] {
+        t.execute(&format!("UPDATE {table} SET track_id = ?1 WHERE track_id = ?2"), (keeper, track_id))?;
+    }
+    let has_cues = t.query_row("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cue_points'", [], |_| Ok(())).optional()?.is_some();
+    if has_cues {
+        t.execute(
+            "UPDATE cue_points SET track_id = ?1 WHERE track_id = ?2 AND auto = 0
+               AND NOT EXISTS (SELECT 1 FROM cue_points WHERE track_id = ?1 AND auto = 0)",
+            (keeper, track_id),
+        )?;
+    }
+    Ok(())
+}
+
 /// Keep the inbox rows pointing at a release that still exists (`ON DELETE SET NULL` would drop
 /// the link, and with it the only record of which wishlist entry this music came from).
-fn repoint_inbox(t: &Transaction<'_>, release_id: i64, target: Option<i64>) -> ApiResult<()> {
+pub(crate) fn repoint_inbox(t: &Transaction<'_>, release_id: i64, target: Option<i64>) -> ApiResult<()> {
     if let Some(target) = target {
         t.execute("UPDATE harvest_items SET release_id = ?1 WHERE release_id = ?2", (target, release_id))?;
     }
